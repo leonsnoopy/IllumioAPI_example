@@ -53,6 +53,11 @@ def setup_logging(log_filename="illumio.log"):
 def main():
     # Setup logging to illumio.log and console filter
     setup_logging()
+    logger = logging.getLogger("illumio_client")
+    
+    # Parse command line arguments
+    args = sys.argv[1:]
+    logger.info(f"程式啟動，執行參數: {args}")
     
     # Guard clause: ensure API credentials are provided before proceeding
     if not config.API_KEY_ID or not config.API_SECRET_TOKEN or config.API_KEY_ID.startswith("api_xxxx"):
@@ -118,6 +123,7 @@ def main():
     # Execute actions sequentially
     for target, filter_val in targets:
         func = AVAILABLE_METHODS[target]
+        logger.info(f"開始執行動作: {target}" + (f" (過濾條件: '{filter_val}')" if filter_val else ""))
         func(client, filter_val)
 
 if __name__ == "__main__":

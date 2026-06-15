@@ -299,6 +299,7 @@ def interactive_tagging(client, filter_val=None):
     """
     An interactive wizard to bulk assign/modify labels for multiple workloads.
     """
+    logger.info("使用者啟動了『自動化貼標籤功能 (interactive_tagging)』")
     print_separator("自動化貼標籤功能")
     print("本功能將引導您逐步選擇 Workloads 與 Labels，最後進行批次套用與合併。")
     
@@ -312,6 +313,7 @@ def interactive_tagging(client, filter_val=None):
         while True:
             print_separator("步驟 1：挑選要貼上標籤的 Workloads")
             filter_keyword = input("請輸入搜尋 Workload 關鍵字 (直接 Enter 可查詢全部): ").strip()
+            logger.info(f"步驟 1：輸入搜尋 Workload 關鍵字 '{filter_keyword}'")
             
             print("正在獲取 Workload 清單，請稍後...")
             try:
@@ -331,6 +333,7 @@ def interactive_tagging(client, filter_val=None):
             
             if not filtered_wls:
                 print(f"找不到任何名稱或主機名稱含有 '{filter_keyword}' 的 Workload。")
+                logger.info("搜尋 Workload 結果為空。")
             else:
                 print(f"\n找到以下符合的 Workload 列表 (共 {len(filtered_wls)} 台):")
                 print(f"{'編號':<6} {'狀態':<8} {'Name':<25} {'Hostname':<25}")
@@ -350,16 +353,20 @@ def interactive_tagging(client, filter_val=None):
                 
                 select_input = input("\n請輸入要勾選/取消勾選的編號 (例如: 1, 2 或 1-3，直接 Enter 跳過): ").strip()
                 if select_input:
+                    logger.info(f"使用者輸入勾選 Workload 編號: '{select_input}'")
                     parsed_idx = parse_selection_indices(select_input, len(filtered_wls))
                     for i in parsed_idx:
                         wl = filtered_wls[i - 1]
                         href = wl.get("href")
+                        wl_name = wl.get('name') or wl.get('hostname') or href
                         if href in selected_workloads:
                             del selected_workloads[href]
-                            print(f"  [取消勾選] {wl.get('name') or wl.get('hostname') or href}")
+                            print(f"  [取消勾選] {wl_name}")
+                            logger.info(f"取消勾選 Workload: {wl_name} ({href})")
                         else:
                             selected_workloads[href] = wl
-                            print(f"  [已勾選] {wl.get('name') or wl.get('hostname') or href}")
+                            print(f"  [已勾選] {wl_name}")
+                            logger.info(f"已勾選 Workload: {wl_name} ({href})")
             
             print(f"\n目前已挑選的 Workloads 數量: {len(selected_workloads)} 台")
             
@@ -370,15 +377,19 @@ def interactive_tagging(client, filter_val=None):
             print("  3. 離開並取消")
             
             choice = input("請輸入選項 (1/2/3): ").strip()
+            logger.info(f"步驟 1 後續動作選擇: {choice}")
             if choice == "2":
                 if not selected_workloads:
                     print("[提示] 您尚未挑選任何 Workload！")
                     confirm = input("確定要繼續前往下一步挑選標籤嗎？(y/n): ").strip().lower()
                     if confirm != 'y':
                         continue
+                wl_names = [w.get('name') or w.get('hostname') or w.get('href') for w in selected_workloads.values()]
+                logger.info(f"進入步驟 2。目前已鎖定 Workloads 共 {len(selected_workloads)} 台: {wl_names}")
                 break
             elif choice == "3":
                 print("取消操作。離開功能。")
+                logger.info("取消工作負載貼標流程。離開。")
                 return
             # If option 1 or other input, loop again
             
@@ -388,6 +399,7 @@ def interactive_tagging(client, filter_val=None):
         while True:
             print_separator("步驟 2：挑選要貼上的 Labels")
             filter_keyword = input("請輸入搜尋 Label 關鍵字 (直接 Enter 可查詢全部): ").strip()
+            logger.info(f"步驟 2：輸入搜尋 Label 關鍵字 '{filter_keyword}'")
             
             print("正在獲取 Label 清單，請稍後...")
             try:
@@ -407,6 +419,7 @@ def interactive_tagging(client, filter_val=None):
                     
             if not filtered_lbls:
                 print(f"找不到任何維度(Key)或數值(Value)含有 '{filter_keyword}' 的 Label。")
+                logger.info("搜尋 Label 結果為空。")
             else:
                 print(f"\n找到以下符合的 Label 列表 (共 {len(filtered_lbls)} 個):")
                 print(f"{'編號':<6} {'狀態':<8} {'Key (維度)':<15} {'Value (標籤值)':<25}")
@@ -420,16 +433,20 @@ def interactive_tagging(client, filter_val=None):
                     
                 select_input = input("\n請輸入要勾選/取消勾選的編號 (例如: 1, 2 或 1-3，直接 Enter 跳過): ").strip()
                 if select_input:
+                    logger.info(f"使用者輸入勾選 Label 編號: '{select_input}'")
                     parsed_idx = parse_selection_indices(select_input, len(filtered_lbls))
                     for i in parsed_idx:
                         lbl = filtered_lbls[i - 1]
                         href = lbl.get("href")
+                        lbl_desc = f"{lbl.get('key')}:{lbl.get('value')}"
                         if href in selected_labels:
                             del selected_labels[href]
-                            print(f"  [取消勾選標籤] {lbl.get('key')}: {lbl.get('value')}")
+                            print(f"  [取消勾選標籤] {lbl_desc}")
+                            logger.info(f"取消勾選 Label: {lbl_desc} ({href})")
                         else:
                             selected_labels[href] = lbl
-                            print(f"  [已勾選標籤] {lbl.get('key')}: {lbl.get('value')}")
+                            print(f"  [已勾選標籤] {lbl_desc}")
+                            logger.info(f"已勾選 Label: {lbl_desc} ({href})")
                             
             print(f"\n目前已挑選的 Labels 數量: {len(selected_labels)} 個")
             
@@ -440,15 +457,19 @@ def interactive_tagging(client, filter_val=None):
             print("  3. 離開並取消")
             
             choice = input("請輸入選項 (1/2/3): ").strip()
+            logger.info(f"步驟 2 後續動作選擇: {choice}")
             if choice == "2":
                 if not selected_labels:
                     print("[提示] 您尚未挑選任何 Label！")
                     confirm = input("確定要繼續前往最終確認嗎？(y/n): ").strip().lower()
                     if confirm != 'y':
                         continue
+                label_descs = [f"{l.get('key')}:{l.get('value')}" for l in selected_labels.values()]
+                logger.info(f"進入步驟 3。目前已鎖定 Labels 共 {len(selected_labels)} 個: {label_descs}")
                 break
             elif choice == "3":
                 print("取消操作。離開功能。")
+                logger.info("取消標籤貼標流程。離開。")
                 return
                 
         # ----------------------------------------------------
@@ -466,8 +487,10 @@ def interactive_tagging(client, filter_val=None):
             print(f"  [{idx}] {lbl.get('key')}: {lbl.get('value')}")
             
         confirm = input("\n[警示] 請確認以上內容。是否立即執行貼標籤動作？ (Y/N): ").strip().lower()
+        logger.info(f"最終貼標確認使用者輸入: '{confirm}'")
         if confirm != 'y':
             print("操作已取消。離開功能。")
+            logger.info("使用者拒絕最終確認，貼標取消。")
             return
             
         print("\n開始執行標籤更新...")
@@ -501,9 +524,11 @@ def interactive_tagging(client, filter_val=None):
                 "labels": list(merged_labels.values())
             }
             
+            logger.info(f"正在更新 Workload '{wl_name}' ({wl_href}) 的標籤，Payload: {payload}")
             try:
                 client.update_workload(wl_href, payload)
                 print(f"  [成功] Workload '{wl_name}' 貼標完成。")
+                logger.info(f"Workload '{wl_name}' 貼標成功。")
                 success_count += 1
             except Exception as e:
                 logger.error(f"Failed to update workload labels for {wl_href}: {e}", exc_info=True)
@@ -512,9 +537,11 @@ def interactive_tagging(client, filter_val=None):
                 
         print_separator("執行結果摘要")
         print(f"處理完成！ 成功: {success_count} 台, 失敗: {failure_count} 台。")
+        logger.info(f"互動貼標處理完畢。成功: {success_count} 台, 失敗: {failure_count} 台。")
         
     except (KeyboardInterrupt, EOFError):
         print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
+        logger.info("互動貼標操作已被使用者中斷 (KeyboardInterrupt/EOFError)。")
         return
 
 def validate_time(time_str):
@@ -562,6 +589,7 @@ def manage_schedule(client, filter_val=None):
     import os
     import sys
 
+    logger.info("使用者啟動了『排程管理功能 (manage_schedule)』")
     print_separator("排程管理 (Schedule Management)")
     print("此功能可在本機設定定期檢查 VEN 狀態，並在發現異常時自動發送電子郵件通知。")
 
@@ -593,8 +621,10 @@ def manage_schedule(client, filter_val=None):
         print("  4. 每週定時 (weekly)")
         
         freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
+        logger.info(f"Windows 新增/修改排程：頻率選擇='{freq_choice}'")
         if freq_choice not in ["1", "2", "3", "4"]:
             print("[錯誤] 無效的選項，操作已取消。")
+            logger.info("Windows 新增/修改排程：使用者輸入無效選項，操作已取消。")
             return
             
         if freq_choice == "1":
@@ -605,9 +635,11 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                logger.info(f"Windows 新增/修改排程：使用者輸入無效的間隔分鐘數 '{interval_str}'")
                 return
             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "minute", "/mo", str(interval), "/f"]
             freq_desc = f"每隔 {interval} 分鐘"
+            logger.info(f"設定 Windows 排程：{freq_desc}")
         elif freq_choice == "2":
             interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
             try:
@@ -616,74 +648,94 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                logger.info(f"Windows 新增/修改排程：使用者輸入無效的間隔小時數 '{interval_str}'")
                 return
             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "hourly", "/mo", str(interval), "/f"]
             freq_desc = f"每隔 {interval} 小時"
+            logger.info(f"設定 Windows 排程：{freq_desc}")
         elif freq_choice == "3":
             time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。必須為 HH:MM 且在 00:00 到 23:59 之間，操作已取消。")
+                logger.info(f"Windows 新增/修改排程：使用者輸入無效的每日時間 '{time_str}'")
                 return
             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "daily", "/st", time_str, "/f"]
             freq_desc = f"每天定時 {time_str}"
+            logger.info(f"設定 Windows 排程：{freq_desc}")
         else:
             days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
             days, err = parse_weekdays(days_str)
             if err:
                 print(f"[錯誤] {err}")
+                logger.info(f"Windows 新增/修改排程：使用者輸入無效的星期 '{days_str}' (錯誤: {err})")
                 return
             time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。操作已取消。")
+                logger.info(f"Windows 新增/修改排程：使用者輸入無效的執行時間 '{time_str}'")
                 return
             days_formatted = ",".join(days)
             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "weekly", "/d", days_formatted, "/st", time_str, "/f"]
             freq_desc = f"每週 {days_formatted} 的 {time_str}"
+            logger.info(f"設定 Windows 排程：{freq_desc}")
             
         try:
+            logger.info(f"執行 Windows 建立排程指令: {' '.join(cmd)}")
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             print(f"\n[成功] 已成功建立/更新 Windows 排程！")
             print(f"  排程名稱：{task_name}")
             print(f"  執行頻率：{freq_desc}")
+            logger.info(f"Windows 排程建立/更新成功: {freq_desc}")
         except subprocess.CalledProcessError as err:
             print(f"\n[失敗] 無法建立 Windows 排程：")
             print(f"  Exit code: {err.returncode}")
             print(f"  Stderr: {err.stderr.strip()}")
+            logger.error(f"Windows 排程建立/更新失敗, Exit code: {err.returncode}, Error: {err.stderr.strip()}")
 
     def win_list():
         cmd = ["schtasks", "/query", "/tn", task_name, "/fo", "list"]
         try:
+            logger.info(f"執行 Windows 查詢排程指令: {' '.join(cmd)}")
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
             lines = res.stdout.splitlines()
             print(f"\n當前 Windows 排程 '{task_name}' 的狀態：")
             for line in lines:
                 if any(key in line for key in ["TaskName:", "Next Run Time:", "Status:", "Logon Mode:"]):
                     print("  " + line.strip())
+            logger.info("Windows 排程查詢成功")
         except subprocess.CalledProcessError:
             print(f"\n[提示] 目前未在 Windows 中設定 '{task_name}' 的定期檢查排程。")
+            logger.info("Windows 排程查詢結果：目前未設定該排程。")
 
     def win_delete():
         cmd = ["schtasks", "/delete", "/tn", task_name, "/f"]
         try:
+            logger.info(f"執行 Windows 刪除排程指令: {' '.join(cmd)}")
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             print(f"\n[成功] 已成功刪除 Windows 中的排程 '{task_name}'。")
+            logger.info(f"Windows 排程 '{task_name}' 刪除成功。")
         except subprocess.CalledProcessError as err:
             if "ERROR: The system cannot find the file specified" in err.stderr or "系統找不到指定的檔案" in err.stderr:
                 print(f"\n[提示] 找不到排程 '{task_name}'，可能本來就未設定。")
+                logger.info(f"Windows 刪除排程：找不到排程 '{task_name}'，可能本來就未設定。")
             else:
                 print(f"\n[失敗] 刪除 Windows 排程時出錯：{err.stderr.strip()}")
+                logger.error(f"Windows 刪除排程失敗: {err.stderr.strip()}")
 
     def win_trigger_test():
         print(f"\n正在向 Windows 排程器發送立即觸發任務 '{task_name}' 的指令...")
         cmd = ["schtasks", "/run", "/tn", task_name]
         try:
+            logger.info(f"執行 Windows 立即觸發背景排程指令: {' '.join(cmd)}")
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             print(f"[成功] 已成功觸發 Windows 背景排程！")
             print("  - 任務已開始在背景運行。")
             print("  - 您可以檢視 'illumio.log' 以確認最新執行結果，或檢查收件人信箱是否收到告警信。")
+            logger.info("Windows 背景排程觸發成功。")
         except subprocess.CalledProcessError as err:
             print(f"[失敗] 無法觸發排程任務 (錯誤: {err.stderr.strip()})")
             print(f"  提示: 請確認是否已建立排程。")
+            logger.error(f"Windows 觸發背景排程失敗: {err.stderr.strip()}")
 
     def linux_add_modify():
         print("\n請選擇定期檢查的頻率：")
@@ -693,8 +745,10 @@ def manage_schedule(client, filter_val=None):
         print("  4. 每週定時 (weekly)")
         
         freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
+        logger.info(f"Linux 新增/修改排程：頻率選擇='{freq_choice}'")
         if freq_choice not in ["1", "2", "3", "4"]:
             print("[錯誤] 無效的選項，操作已取消。")
+            logger.info("Linux 新增/修改排程：使用者輸入無效選項，操作已取消。")
             return
             
         if freq_choice == "1":
@@ -705,9 +759,11 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                logger.info(f"Linux 新增/修改排程：使用者輸入無效的間隔分鐘數 '{interval_str}'")
                 return
             cron_expr = f"*/{interval} * * * *"
             freq_desc = f"每隔 {interval} 分鐘"
+            logger.info(f"設定 Linux 排程：{freq_desc}")
         elif freq_choice == "2":
             interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
             try:
@@ -716,26 +772,32 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                logger.info(f"Linux 新增/修改排程：使用者輸入無效的間隔小時數 '{interval_str}'")
                 return
             cron_expr = f"0 */{interval} * * *"
             freq_desc = f"每隔 {interval} 小時"
+            logger.info(f"設定 Linux 排程：{freq_desc}")
         elif freq_choice == "3":
             time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。操作已取消。")
+                logger.info(f"Linux 新增/修改排程：使用者輸入無效的每日時間 '{time_str}'")
                 return
             hh, mm = map(int, time_str.split(":"))
             cron_expr = f"{mm} {hh} * * *"
             freq_desc = f"每天定時 {time_str}"
+            logger.info(f"設定 Linux 排程：{freq_desc}")
         else:
             days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
             days, err = parse_weekdays(days_str)
             if err:
                 print(f"[錯誤] {err}")
+                logger.info(f"Linux 新增/修改排程：使用者輸入無效的星期 '{days_str}' (錯誤: {err})")
                 return
             time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。操作已取消。")
+                logger.info(f"Linux 新增/修改排程：使用者輸入無效的執行時間 '{time_str}'")
                 return
             
             hh, mm = map(int, time_str.split(":"))
@@ -744,14 +806,16 @@ def manage_schedule(client, filter_val=None):
             
             cron_expr = f"{mm} {hh} * * {cron_days}"
             freq_desc = f"每週 {','.join(days)} 的 {time_str}"
+            logger.info(f"設定 Linux 排程：{freq_desc}")
             
         current_cron = ""
         try:
+            logger.info("執行 Linux crontab -l 查詢當前排程以進行備份/更新")
             res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
             if res.returncode == 0:
                 current_cron = res.stdout
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Linux crontab -l 查詢失敗或無現有排程: {e}")
             
         cron_lines = current_cron.splitlines()
         new_cron_lines = [line for line in cron_lines if f"# {task_name}" not in line]
@@ -761,36 +825,46 @@ def manage_schedule(client, filter_val=None):
         
         new_cron_content = "\n".join(new_cron_lines) + "\n"
         try:
+            logger.info(f"更新 Linux crontab 內容，新項目: {new_line}")
             subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
             print(f"\n[成功] 已成功建立/更新 Linux crontab 排程！")
             print(f"  排程項目：{new_line}")
             print(f"  執行頻率：{freq_desc}")
+            logger.info(f"Linux crontab 排程更新成功: {freq_desc}")
         except subprocess.CalledProcessError as err:
             print(f"\n[失敗] 無法寫入 crontab (錯誤: {err.stderr.strip()})")
+            logger.error(f"Linux crontab 排程更新失敗, Error: {err.stderr.strip()}")
 
     def linux_list():
         try:
+            logger.info("執行 Linux crontab -l 查詢排程")
             res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
             if res.returncode != 0:
                 print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程 (無 crontab)。")
+                logger.info("Linux crontab 查詢結果：目前未設定 crontab 排程。")
                 return
                 
             lines = res.stdout.splitlines()
             matched_lines = [line for line in lines if f"# {task_name}" in line]
             if not matched_lines:
                 print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程。")
+                logger.info("Linux crontab 查詢結果：目前無相關排程項目。")
             else:
                 print(f"\n當前 Linux crontab 中的相關排程：")
                 for line in matched_lines:
                     print(f"  {line}")
+                logger.info("Linux crontab 查詢成功。")
         except Exception as e:
             print(f"\n[錯誤] 查詢 crontab 時出錯: {e}")
+            logger.error(f"Linux 查詢 crontab 時出錯: {e}")
 
     def linux_delete():
         try:
+            logger.info("執行 Linux crontab -l 讀取排程以進行刪除")
             res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
             if res.returncode != 0:
-                print(f"\n[提示] 找不到任何排程，目前沒有 crontab。")
+                print(f"\n[提示] 找不到排程，目前沒有 crontab。")
+                logger.info("Linux 刪除排程：找不到任何排程，目前沒有 crontab。")
                 return
                 
             lines = res.stdout.splitlines()
@@ -799,22 +873,30 @@ def manage_schedule(client, filter_val=None):
             has_other_jobs = any(line.strip() for line in new_lines)
             
             if not has_other_jobs:
+                logger.info("執行 Linux crontab -r 清空 crontab")
                 subprocess.run(["crontab", "-r"], capture_output=True)
                 print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}' (crontab 已清空)。")
+                logger.info(f"Linux crontab 中的排程 '{task_name}' 刪除成功（且 crontab 已完全清空）。")
             else:
                 new_cron_content = "\n".join(new_lines) + "\n"
+                logger.info("執行 Linux crontab - 更新排程項目")
                 subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
                 print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}'。")
+                logger.info(f"Linux crontab 中的排程 '{task_name}' 刪除成功。")
         except Exception as e:
             print(f"\n[失敗] 刪除 Linux 排程時出錯: {e}")
+            logger.error(f"Linux 刪除排程失敗: {e}")
 
     def linux_trigger_test():
+        logger.info(f"執行 Linux 前景排程測試指令: {sys.executable} {main_py_path} vens")
         print(f"\n正在 Linux 上執行排程測試 (於前景執行 'python main.py vens')...")
         try:
             subprocess.run([sys.executable, main_py_path, "vens"], check=True)
             print(f"[成功] 測試執行完成！已於前景輸出結果。")
+            logger.info("Linux 前景排程測試執行成功。")
         except Exception as e:
             print(f"[失敗] 執行測試任務時出錯: {e}")
+            logger.error(f"Linux 前景排程測試執行失敗: {e}")
 
     try:
         while True:
@@ -826,6 +908,7 @@ def manage_schedule(client, filter_val=None):
             print("  5. 離開")
             
             choice = input("請輸入選項 (1/2/3/4/5): ").strip()
+            logger.info(f"排程管理選單選擇: '{choice}'")
             if choice == "1":
                 if is_windows:
                     win_add_modify()
@@ -848,8 +931,11 @@ def manage_schedule(client, filter_val=None):
                     linux_trigger_test()
             elif choice == "5":
                 print("離開排程管理選單。")
+                logger.info("離開排程管理選單。")
                 break
             else:
                 print("[提示] 無效的選項，請重新輸入。")
+                logger.info(f"排程管理選單：輸入了無效選項 '{choice}'")
     except (KeyboardInterrupt, EOFError):
         print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
+        logger.info("排程管理操作已被使用者中斷 (KeyboardInterrupt/EOFError)。")
