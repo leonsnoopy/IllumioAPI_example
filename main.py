@@ -19,6 +19,7 @@ AVAILABLE_METHODS = {
     "labels": method.get_labels,
     "workloads": method.get_workloads,
     "vens": method.get_vens,
+    "tag": method.interactive_tagging,
 }
 
 def setup_logging(log_filename="illumio.log"):

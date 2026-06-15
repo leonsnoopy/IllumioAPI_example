@@ -148,5 +148,84 @@ class TestIllumioClient(unittest.TestCase):
         with self.assertRaises(requests.exceptions.HTTPError):
             self.client.check_health()
 
+    def test_parse_selection_indices(self):
+        from method import parse_selection_indices
+        # Test basic cases
+        self.assertEqual(parse_selection_indices("1", 5), [1])
+        self.assertEqual(parse_selection_indices("1,2,3", 5), [1, 2, 3])
+        # Test spaces and commas
+        self.assertEqual(parse_selection_indices("1 2 3", 5), [1, 2, 3])
+        self.assertEqual(parse_selection_indices("1, 2,  3", 5), [1, 2, 3])
+        # Test ranges
+        self.assertEqual(parse_selection_indices("1-3", 5), [1, 2, 3])
+        self.assertEqual(parse_selection_indices("1-3, 5", 5), [1, 2, 3, 5])
+        self.assertEqual(parse_selection_indices("3-1", 5), [1, 2, 3])
+        # Test out of bounds
+        self.assertEqual(parse_selection_indices("1-10", 5), [1, 2, 3, 4, 5])
+        self.assertEqual(parse_selection_indices("0, 6", 5), [])
+
+    @patch('method.input')
+    @patch('illumio_client.IllumioClient.update_workload')
+    @patch('illumio_client.IllumioClient.get_labels')
+    @patch('illumio_client.IllumioClient.get_workloads')
+    def test_interactive_tagging_flow(self, mock_get_workloads, mock_get_labels, mock_update_workload, mock_input):
+        # 1. Setup mocked workloads
+        mock_get_workloads.return_value = [
+            {
+                "href": "/orgs/1/workloads/w1",
+                "name": "win-db-01",
+                "hostname": "win-db-01.local",
+                "labels": [
+                    {"key": "env", "href": "/orgs/1/labels/env-prod", "value": "Prod"},
+                    {"key": "role", "href": "/orgs/1/labels/role-db", "value": "DB"}
+                ]
+            },
+            {
+                "href": "/orgs/1/workloads/w2",
+                "name": "linux-web-01",
+                "hostname": "linux-web-01.local",
+                "labels": [
+                    {"key": "env", "href": "/orgs/1/labels/env-dev", "value": "Dev"}
+                ]
+            }
+        ]
+        
+        # 2. Setup mocked labels
+        mock_get_labels.return_value = [
+            {"href": "/orgs/1/labels/role-web", "key": "role", "value": "Web"},
+            {"href": "/orgs/1/labels/loc-us", "key": "loc", "value": "US"}
+        ]
+        
+        # 3. Setup input mock sequence
+        mock_input.side_effect = [
+            "win",      # Filter workloads
+            "1",        # Select 1st workload (win-db-01)
+            "2",        # Action 2 (complete workloads selection)
+            "loc",      # Filter labels
+            "1",        # Select 1st label (loc-us)
+            "2",        # Action 2 (complete labels selection)
+            "y"         # Confirm application
+        ]
+        
+        from method import interactive_tagging
+        interactive_tagging(self.client)
+        
+        # Verify get methods were called
+        mock_get_workloads.assert_called_once()
+        mock_get_labels.assert_called_once()
+        
+        # Verify update_workload was called with correct merged payload
+        mock_update_workload.assert_called_once()
+        args, kwargs = mock_update_workload.call_args
+        self.assertEqual(args[0], "/orgs/1/workloads/w1")
+        
+        # Check that all expected merged elements are present
+        payload_sent = args[1]
+        labels_sent = payload_sent["labels"]
+        self.assertEqual(len(labels_sent), 3)
+        self.assertTrue({"href": "/orgs/1/labels/env-prod"} in labels_sent)
+        self.assertTrue({"href": "/orgs/1/labels/role-db"} in labels_sent)
+        self.assertTrue({"href": "/orgs/1/labels/loc-us"} in labels_sent)
+
 if __name__ == '__main__':
     unittest.main()

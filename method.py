@@ -262,3 +262,257 @@ def get_vens(client, filter_val=None):
         logger.error(f"Failed to retrieve VENs: {e}", exc_info=True)
         print(f"VEN 資訊: 取得失敗 (錯誤: {e})")
         return None
+
+def parse_selection_indices(input_str, max_val):
+    """
+    Parses a string of comma-separated or space-separated numbers and ranges (e.g. '1, 2, 4-6').
+    Returns a sorted list of unique valid 1-based indices.
+    """
+    indices = set()
+    # Replace space delimiters with commas
+    normalized = input_str.replace(" ", ",")
+    parts = normalized.split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                start_str, end_str = part.split("-", 1)
+                start_i = int(start_str.strip())
+                end_i = int(end_str.strip())
+                for i in range(min(start_i, end_i), max(start_i, end_i) + 1):
+                    if 1 <= i <= max_val:
+                        indices.add(i)
+            except ValueError:
+                pass
+        else:
+            try:
+                i = int(part)
+                if 1 <= i <= max_val:
+                    indices.add(i)
+            except ValueError:
+                pass
+    return sorted(list(indices))
+
+def interactive_tagging(client, filter_val=None):
+    """
+    An interactive wizard to bulk assign/modify labels for multiple workloads.
+    """
+    print_separator("自動化貼標籤功能")
+    print("本功能將引導您逐步選擇 Workloads 與 Labels，最後進行批次套用與合併。")
+    
+    selected_workloads = {}  # href -> workload dict
+    selected_labels = {}     # href -> label dict
+
+    try:
+        # ----------------------------------------------------
+        # 第一階段：挑選 Workload
+        # ----------------------------------------------------
+        while True:
+            print_separator("步驟 1：挑選要貼上標籤的 Workloads")
+            filter_keyword = input("請輸入搜尋 Workload 關鍵字 (直接 Enter 可查詢全部): ").strip()
+            
+            print("正在獲取 Workload 清單，請稍後...")
+            try:
+                workloads = client.get_workloads()
+            except Exception as e:
+                logger.error(f"Failed to fetch workloads: {e}", exc_info=True)
+                print(f"[錯誤] 無法取得 Workload 清單 (錯誤: {e})")
+                return
+            
+            # Apply filter locally
+            filtered_wls = []
+            for wl in workloads:
+                name = wl.get("name") or ""
+                hostname = wl.get("hostname") or ""
+                if not filter_keyword or (filter_keyword.lower() in name.lower() or filter_keyword.lower() in hostname.lower()):
+                    filtered_wls.append(wl)
+            
+            if not filtered_wls:
+                print(f"找不到任何名稱或主機名稱含有 '{filter_keyword}' 的 Workload。")
+            else:
+                print(f"\n找到以下符合的 Workload 列表 (共 {len(filtered_wls)} 台):")
+                print(f"{'編號':<6} {'狀態':<8} {'Name':<25} {'Hostname':<25}")
+                print("-" * 70)
+                for idx, wl in enumerate(filtered_wls, 1):
+                    name = wl.get("name") or "N/A"
+                    hostname = wl.get("hostname") or "N/A"
+                    href = wl.get("href")
+                    
+                    if len(name) > 23:
+                        name = name[:20] + "..."
+                    if len(hostname) > 23:
+                        hostname = hostname[:20] + "..."
+                        
+                    status_char = "[已勾選]" if href in selected_workloads else "[ ]"
+                    print(f"{idx:<6} {status_char:<8} {name:<25} {hostname:<25}")
+                
+                select_input = input("\n請輸入要勾選/取消勾選的編號 (例如: 1, 2 或 1-3，直接 Enter 跳過): ").strip()
+                if select_input:
+                    parsed_idx = parse_selection_indices(select_input, len(filtered_wls))
+                    for i in parsed_idx:
+                        wl = filtered_wls[i - 1]
+                        href = wl.get("href")
+                        if href in selected_workloads:
+                            del selected_workloads[href]
+                            print(f"  [取消勾選] {wl.get('name') or wl.get('hostname') or href}")
+                        else:
+                            selected_workloads[href] = wl
+                            print(f"  [已勾選] {wl.get('name') or wl.get('hostname') or href}")
+            
+            print(f"\n目前已挑選的 Workloads 數量: {len(selected_workloads)} 台")
+            
+            # Menu options
+            print("\n請選擇後續動作:")
+            print("  1. 再次挑選 Workload (使用不同關鍵字過濾)")
+            print("  2. 完成挑選 Workload，進入下一步挑選標籤")
+            print("  3. 離開並取消")
+            
+            choice = input("請輸入選項 (1/2/3): ").strip()
+            if choice == "2":
+                if not selected_workloads:
+                    print("[提示] 您尚未挑選任何 Workload！")
+                    confirm = input("確定要繼續前往下一步挑選標籤嗎？(y/n): ").strip().lower()
+                    if confirm != 'y':
+                        continue
+                break
+            elif choice == "3":
+                print("取消操作。離開功能。")
+                return
+            # If option 1 or other input, loop again
+            
+        # ----------------------------------------------------
+        # 第二階段：挑選 Label
+        # ----------------------------------------------------
+        while True:
+            print_separator("步驟 2：挑選要貼上的 Labels")
+            filter_keyword = input("請輸入搜尋 Label 關鍵字 (直接 Enter 可查詢全部): ").strip()
+            
+            print("正在獲取 Label 清單，請稍後...")
+            try:
+                labels = client.get_labels()
+            except Exception as e:
+                logger.error(f"Failed to fetch labels: {e}", exc_info=True)
+                print(f"[錯誤] 無法取得 Label 清單 (錯誤: {e})")
+                return
+            
+            # Apply filter locally
+            filtered_lbls = []
+            for lbl in labels:
+                key = lbl.get("key") or ""
+                value = lbl.get("value") or ""
+                if not filter_keyword or (filter_keyword.lower() in key.lower() or filter_keyword.lower() in value.lower()):
+                    filtered_lbls.append(lbl)
+                    
+            if not filtered_lbls:
+                print(f"找不到任何維度(Key)或數值(Value)含有 '{filter_keyword}' 的 Label。")
+            else:
+                print(f"\n找到以下符合的 Label 列表 (共 {len(filtered_lbls)} 個):")
+                print(f"{'編號':<6} {'狀態':<8} {'Key (維度)':<15} {'Value (標籤值)':<25}")
+                print("-" * 60)
+                for idx, lbl in enumerate(filtered_lbls, 1):
+                    key = lbl.get("key") or "N/A"
+                    val = lbl.get("value") or "N/A"
+                    href = lbl.get("href")
+                    status_char = "[已勾選]" if href in selected_labels else "[ ]"
+                    print(f"{idx:<6} {status_char:<8} {key:<15} {val:<25}")
+                    
+                select_input = input("\n請輸入要勾選/取消勾選的編號 (例如: 1, 2 或 1-3，直接 Enter 跳過): ").strip()
+                if select_input:
+                    parsed_idx = parse_selection_indices(select_input, len(filtered_lbls))
+                    for i in parsed_idx:
+                        lbl = filtered_lbls[i - 1]
+                        href = lbl.get("href")
+                        if href in selected_labels:
+                            del selected_labels[href]
+                            print(f"  [取消勾選標籤] {lbl.get('key')}: {lbl.get('value')}")
+                        else:
+                            selected_labels[href] = lbl
+                            print(f"  [已勾選標籤] {lbl.get('key')}: {lbl.get('value')}")
+                            
+            print(f"\n目前已挑選的 Labels 數量: {len(selected_labels)} 個")
+            
+            # Menu options
+            print("\n請選擇後續動作:")
+            print("  1. 再次挑選 Label (使用不同關鍵字過濾)")
+            print("  2. 完成挑選 Label，進入最終確認")
+            print("  3. 離開並取消")
+            
+            choice = input("請輸入選項 (1/2/3): ").strip()
+            if choice == "2":
+                if not selected_labels:
+                    print("[提示] 您尚未挑選任何 Label！")
+                    confirm = input("確定要繼續前往最終確認嗎？(y/n): ").strip().lower()
+                    if confirm != 'y':
+                        continue
+                break
+            elif choice == "3":
+                print("取消操作。離開功能。")
+                return
+                
+        # ----------------------------------------------------
+        # 第三階段：最終確認與套用
+        # ----------------------------------------------------
+        print_separator("步驟 3：最終確認與批次套用")
+        print(f"預計套用標籤的 Workloads (共 {len(selected_workloads)} 台):")
+        for idx, wl in enumerate(selected_workloads.values(), 1):
+            name = wl.get("name") or "N/A"
+            hostname = wl.get("hostname") or "N/A"
+            print(f"  [{idx}] {name} ({hostname})")
+            
+        print(f"\n預計新增/修改的 Labels (共 {len(selected_labels)} 個):")
+        for idx, lbl in enumerate(selected_labels.values(), 1):
+            print(f"  [{idx}] {lbl.get('key')}: {lbl.get('value')}")
+            
+        confirm = input("\n[警示] 請確認以上內容。是否立即執行貼標籤動作？ (Y/N): ").strip().lower()
+        if confirm != 'y':
+            print("操作已取消。離開功能。")
+            return
+            
+        print("\n開始執行標籤更新...")
+        success_count = 0
+        failure_count = 0
+        
+        for wl in selected_workloads.values():
+            wl_href = wl.get("href")
+            wl_name = wl.get("name") or wl.get("hostname") or wl_href
+            
+            # Merge logic: Group existing labels by Key, and merge with new labels
+            merged_labels = {}
+            
+            # Get current labels on the workload (if any)
+            existing_labels = wl.get("labels") or []
+            for el in existing_labels:
+                el_key = el.get("key")
+                el_href = el.get("href")
+                if el_key and el_href:
+                    merged_labels[el_key] = {"href": el_href}
+                    
+            # Overwrite/Add newly selected labels (which will overwrite any matching Key)
+            for nl in selected_labels.values():
+                nl_key = nl.get("key")
+                nl_href = nl.get("href")
+                if nl_key and nl_href:
+                    merged_labels[nl_key] = {"href": nl_href}
+                    
+            # Construct final payload
+            payload = {
+                "labels": list(merged_labels.values())
+            }
+            
+            try:
+                client.update_workload(wl_href, payload)
+                print(f"  [成功] Workload '{wl_name}' 貼標完成。")
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to update workload labels for {wl_href}: {e}", exc_info=True)
+                print(f"  [失敗] Workload '{wl_name}' 更新失敗 (錯誤: {e})")
+                failure_count += 1
+                
+        print_separator("執行結果摘要")
+        print(f"處理完成！ 成功: {success_count} 台, 失敗: {failure_count} 台。")
+        
+    except (KeyboardInterrupt, EOFError):
+        print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
+        return
