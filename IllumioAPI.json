@@ -1,0 +1,544 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Illumio REST API 25.4 完整參考手冊",
+        "description": "此文件為根據 Illumio REST APIs 25.4 技術手冊所生成的完整 OpenAPI JSON 規格檔案，涵蓋驗證、非同步任務、PCE管理、安全策略、RBAC權限、可視化流量分析、工作負載與漏洞管理及策略變更發布等所有核心 API 端點。",
+        "version": "25.4"
+    },
+    "servers": [
+        {
+            "url": "https://{pce_fqdn}:8443/api/v2",
+            "description": "Illumio PCE 核心伺服器 API 基礎路徑",
+            "variables": {
+                "pce_fqdn": {
+                    "default": "pce.my-company.com",
+                    "description": "您的 Illumio Policy Compute Engine (PCE) 伺服器完整網域名稱"
+                }
+            }
+        }
+    ],
+    "tags": [
+        { "name": "1. 驗證與金鑰管理 (Authentication & Keys)" },
+        { "name": "2. 非同步大數據查詢 (Async GET Collections)" },
+        { "name": "3. PCE 管理與監控 (PCE Management)" },
+        { "name": "4. 安全防火牆策略與規則 (Policy & Rules)" },
+        { "name": "5. 安全策略對象元件 (Policy Objects)" },
+        { "name": "6. 權限與存取控制 (RBAC)" },
+        { "name": "7. 可視化流量與漏洞分析 (Visualization & Vulnerability)" },
+        { "name": "8. 工作負載與 VEN 代理管理 (Workloads & VEN)" },
+        { "name": "9. 策略變更正式發布 (Provisioning)" }
+    ],
+    "paths": {
+        "/login_users/authenticate": {
+            "post": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "使用者登入認證",
+                "description": "提交註冊的 Email 與密碼換取臨時會話憑證（auth_username 與 session_token）。",
+                "responses": { "200": { "description": "成功返回憑證" } }
+            }
+        },
+        "/login_users/me/password": {
+            "put": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "修改當前使用者密碼",
+                "description": "更新目前登入帳戶的密碼，密碼需符合複雜度策略限制。",
+                "responses": { "204": { "description": "密碼更新成功" } }
+            }
+        },
+        "/logout": {
+            "put": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "註銷登入會話",
+                "description": "使當前的安全工作會話與權杖立即失效。",
+                "responses": { "204": { "description": "成功登出" } }
+            }
+        },
+        "/orgs/{org_id}/api_keys": {
+            "get": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "查詢組織內所有 API 金鑰",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["user", "service_account"] } },
+                    { "name": "state", "in": "query", "schema": { "type": "string", "enum": ["active", "expired"] } }
+                ],
+                "responses": { "200": { "description": "傳回金鑰清單" } }
+            }
+        },
+        "/orgs/{org_id}/service_accounts": {
+            "post": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "建立自動化整合服務帳戶",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "服務帳戶建立成功" } }
+            }
+        },
+        "/orgs/{org_id}/service_accounts/{service_account_id}": {
+            "put": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "更新特定服務帳戶變數",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "service_account_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "更新完成" } }
+            },
+            "delete": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "刪除服務帳戶及其關聯金鑰",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "service_account_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "帳戶已完全刪除" } }
+            }
+        },
+        "/orgs/{org_id}/service_accounts/{service_account_id}/api_keys": {
+            "post": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "為指定服務帳戶生成全新 API 金鑰",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "service_account_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "201": { "description": "金鑰生成成功" } }
+            }
+        },
+        "/orgs/{org_id}/service_accounts/{service_account_id}/api_keys/{key_id}": {
+            "delete": {
+                "tags": ["1. 驗證與金鑰管理 (Authentication & Keys)"],
+                "summary": "註銷刪除指定的服務帳戶 API 金鑰",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "service_account_id", "in": "path", "required": true, "schema": { "type": "string" } },
+                    { "name": "key_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "金鑰已註銷" } }
+            }
+        },
+        "/orgs/{org_id}/jobs": {
+            "get": {
+                "tags": ["2. 非同步大數據查詢 (Async GET Collections)"],
+                "summary": "查詢所有背景非同步任務列表",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "傳回任務清單" } }
+            }
+        },
+        "/orgs/{org_id}/jobs/{job_id}": {
+            "get": {
+                "tags": ["2. 非同步大數據查詢 (Async GET Collections)"],
+                "summary": "輪詢追蹤特定非同步任務狀態",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "job_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "返回任務狀態（Pending/Running/Done）" } }
+            },
+            "delete": {
+                "tags": ["2. 非同步大數據查詢 (Async GET Collections)"],
+                "summary": "終止或取消正在執行的背景任務",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "job_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "任務已成功取消" } }
+            }
+        },
+        "/orgs/{org_id}/datafiles/{file_id}": {
+            "get": {
+                "tags": ["2. 非同步大數據查詢 (Async GET Collections)"],
+                "summary": "下載非同步大數據任務導出的結果檔案",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "file_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "傳回大型 JSON 檔案流" } }
+            }
+        },
+        "/health": {
+            "get": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "系統伺服器健康狀態檢查",
+                "description": "返回目前 PCE 群集與各核心運作節點的即時健康監控狀況。",
+                "responses": { "200": { "description": "PCE 狀態正常" } }
+            }
+        },
+        "/orgs/{org_id}/settings": {
+            "get": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "查詢組織全域屬性與系統設定",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "傳回設定檔屬性 JSON" } }
+            },
+            "put": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "變更更新組織全域屬性設定",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "設定更新完成" } }
+            }
+        },
+        "/orgs/{org_id}/events": {
+            "get": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "查詢系統核心審計操作安全日誌",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "傳回系統事件日誌物件陣列" } }
+            }
+        },
+        "/orgs/{org_id}/container_clusters": {
+            "get": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "查詢目前整合對接的容器集群列表",
+                "description": "調取包含 Kubernetes 與 OpenShift 的外部安全整合集群。",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "傳回容器集群清單" } }
+            },
+            "post": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "註冊與對接全新的外部容器集群",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "集群註冊信任成功" } }
+            }
+        },
+        "/orgs/{org_id}/container_clusters/{cluster_id}": {
+            "put": {
+                "tags": ["3. PCE 管理與監控 (PCE Management)"],
+                "summary": "更新指定容器集群的管理配置參數",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "cluster_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "配置修改完成" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/{pversion}/rule_sets": {
+            "get": {
+                "tags": ["4. 安全防火牆策略與規則 (Policy & Rules)"],
+                "summary": "查詢指定策略版本中的規則集 (Rulesets) 列表",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "pversion", "in": "path", "required": true, "schema": { "type": "string", "enum": ["draft", "active"] } }
+                ],
+                "responses": { "200": { "description": "成功返回規則集數據" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/draft/rule_sets": {
+            "post": {
+                "tags": ["4. 安全防火牆策略與規則 (Policy & Rules)"],
+                "summary": "在系統草稿中建立全新的規則集保護容器",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "規則集物件建立成功" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/draft/rule_sets/{ruleset_id}": {
+            "put": {
+                "tags": ["4. 安全防火牆策略與規則 (Policy & Rules)"],
+                "summary": "修改或更新草稿狀態中的特定規則集資訊與作用範圍 (Scopes)",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "ruleset_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "更新完成" } }
+            },
+            "delete": {
+                "tags": ["4. 安全防火牆策略與規則 (Policy & Rules)"],
+                "summary": "從系統草稿中永久移除指定的安全規則集",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "ruleset_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "規則集已刪除" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/{pversion}/rule_search": {
+            "post": {
+                "tags": ["4. 安全防火牆策略與規則 (Policy & Rules)"],
+                "summary": "跨規則集防火牆策略進階交叉檢索搜尋",
+                "description": "傳入特定的來源、目的地、通訊埠等物件參數，精準回溯符合目前安全性防護規章的法條明細。",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "pversion", "in": "path", "required": true, "schema": { "type": "string", "enum": ["draft", "active"] } }
+                ],
+                "responses": { "200": { "description": "返回篩選比對出的規則明細" } }
+            }
+        },
+        "/orgs/{org_id}/labels": {
+            "get": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "獲取組織全域部署的所有安全標籤元件",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "value", "in": "query", "schema": { "type": "string" }, "description": "支援對標籤值進行模糊搜尋（如 APP）" }
+                ],
+                "responses": { "200": { "description": "返回標籤對象陣列" } }
+            },
+            "post": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "建立全新的微隔離多維度維度安全標籤",
+                "description": "定義如 Role、Application、Environment 或 Location 的核心元件。",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "標籤物件建立成功" } }
+            }
+        },
+        "/orgs/{org_id}/labels/{label_id}": {
+            "get": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "查詢單一標籤詳細中繼資料與路徑代碼",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "label_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "成功返回標籤實體屬性" } }
+            },
+            "put": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "修改特定標籤的顯示名稱或綁定屬性",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "label_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "修改完成" } }
+            },
+            "delete": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "從系統中登出清除指定的未被引用標籤元件",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "label_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "標籤物件移除成功" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/{pversion}/services": {
+            "get": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "查詢全域通訊協定與埠口網路服務 (Services) 物件清單",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "pversion", "in": "path", "required": true, "schema": { "type": "string", "enum": ["draft", "active"] } }
+                ],
+                "responses": { "200": { "description": "返回網路服務實體陣列" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/{pversion}/virtual_services": {
+            "get": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "查詢全域對應 VIP 或負載均衡器的虛擬服務列表",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "pversion", "in": "path", "required": true, "schema": { "type": "string", "enum": ["draft", "active"] } }
+                ],
+                "responses": { "200": { "description": "返回虛擬服務陣列" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/{pversion}/ip_lists": {
+            "get": {
+                "tags": ["5. 安全策略對象元件 (Policy Objects)"],
+                "summary": "查詢外部固定網段或 CIDR 範圍的 IP 列表物件集合",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "pversion", "in": "path", "required": true, "schema": { "type": "string", "enum": ["draft", "active"] } }
+                ],
+                "responses": { "200": { "description": "返回 IP 列表元件" } }
+            }
+        },
+        "/orgs/{org_id}/users": {
+            "get": {
+                "tags": ["6. 權限與存取控制 (RBAC)"],
+                "summary": "查詢目前所有可登入後台的管理人員帳號列表",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回後台帳號陣列" } }
+            },
+            "post": {
+                "tags": ["6. 權限與存取控制 (RBAC)"],
+                "summary": "邀請或新增全新的後台系統管理員或審計人員帳戶",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "帳號邀請發送成功" } }
+            }
+        },
+        "/orgs/{org_id}/auth_security_principals": {
+            "get": {
+                "tags": ["6. 權限與存取控制 (RBAC)"],
+                "summary": "查詢與外部認證機制同步關聯的授權安全主體項目",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回同步主體清單" } }
+            },
+            "post": {
+                "tags": ["6. 權限與存取控制 (RBAC)"],
+                "summary": "手動將外部 LDAP / 組織成員映射綁定為內部安全主體",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "映射主體綁定成功" } }
+            }
+        },
+        "/orgs/{org_id}/auth_security_principals/{id}": {
+            "delete": {
+                "tags": ["6. 權限與存取控制 (RBAC)"],
+                "summary": "註銷解除外部特定群組或用戶的後台安全主體存取權限",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "安全主體解綁成功" } }
+            }
+        },
+        "/orgs/{org_id}/explorer/traffic_flows": {
+            "post": {
+                "tags": ["7. 可視化流量與漏洞分析 (Visualization & Vulnerability)"],
+                "summary": "對 VEN 採集上報的真實網絡連線流量執行深度檢索與拓撲分析",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回匹配的連線記錄與 DNS 反查日誌" } }
+            }
+        },
+        "/orgs/{org_id}/traffic_flows/async_queries": {
+            "get": {
+                "tags": ["7. 可視化流量與漏洞分析 (Visualization & Vulnerability)"],
+                "summary": "對巨量流量日誌檢索任務執行非同步查詢狀態追蹤",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回流量 Job 狀態明細" } }
+            }
+        },
+        "/orgs/{org_id}/reports": {
+            "get": {
+                "tags": ["7. 可視化流量與漏洞分析 (Visualization & Vulnerability)"],
+                "summary": "調取系統過往產出的微隔離合規性安全分析報告列表",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回合規報告目錄" } }
+            },
+            "post": {
+                "tags": ["7. 可視化流量與漏洞分析 (Visualization & Vulnerability)"],
+                "summary": "手動即時觸發產出全新範疇的安全防護覆蓋率報告",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "報告生成任務建立成功" } }
+            }
+        },
+        "/orgs/{org_id}/aggregated_detected_vulnerabilities": {
+            "get": {
+                "tags": ["7. 可視化流量與漏洞分析 (Visualization & Vulnerability)"],
+                "summary": "調取由第三方掃描軟體導入的組織內全網資訊弱點彙總矩陣",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "成功返回漏洞總覽矩陣" } }
+            }
+        },
+        "/orgs/{org_id}/workloads": {
+            "get": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "查詢受管與非受管的主機伺服器工作負載 (Workloads) 列表",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "representation", "in": "query", "schema": { "type": "string", "enum": ["workload_labels_vulnerabilities"] }, "description": "進階擴展查詢：同時加載主機標籤與關聯漏洞分數" }
+                ],
+                "responses": { "200": { "description": "傳回伺服器主機陣列數據" } }
+            },
+            "post": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "手動靜態宣告註冊一台未安裝代理的外部主機實體物件",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "外部主機註冊完畢" } }
+            }
+        },
+        "/orgs/{org_id}/workloads/{workload_id}": {
+            "put": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "調整更改特定主機的防護維度模式與標籤指派",
+                "description": "如將強制執行模式更新為 visibility_only、selective 或 enforced 保護模式。",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "workload_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "主機設定更新完成" } }
+            },
+            "delete": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "從管理控制台中永久解綁並移除指定的工作負載伺服器項目",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "workload_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "204": { "description": "主機實體已成功註銷" } }
+            }
+        },
+        "/orgs/{org_id}/workloads/unpair": {
+            "put": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "批量解除主機 VEN 隔離代理配對狀態，還原為初始防火牆放行配置",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "批量解綁任務派發完畢" } }
+            }
+        },
+        "/orgs/{org_id}/workloads/{workload_id}/interfaces": {
+            "get": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "調取特定伺服器主機回報的所有物理與虛擬網路介面卡卡片明細",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "workload_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": { "200": { "description": "返回網路介面卡資訊" } }
+            }
+        },
+        "/orgs/{org_id}/workloads/{workload_id}/detected_vulnerabilities": {
+            "get": {
+                "tags": ["8. 工作負載與 VEN 代理管理 (Workloads & VEN)"],
+                "summary": "查詢該台伺服器上被標記的詳細 CVE 漏洞矩陣與暴露曝險評分",
+                "parameters": [
+                    { "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+                    { "name": "workload_id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "返回主機關聯弱點分數",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "vulnerable_port_exposure": { "type": "integer", "nullable": true },
+                                        "port_vulnerability_exposure_score": { "type": "integer", "nullable": true }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/orgs/{org_id}/sec_policy/pending": {
+            "get": {
+                "tags": ["9. 策略變更正式發布 (Provisioning)"],
+                "summary": "列出檢視目前全組織所有已修改、建立但尚未正式派發的待發布 (Pending) 變更清單",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "200": { "description": "返回待發布修訂項目清單" } }
+            },
+            "delete": {
+                "tags": ["9. 策略變更正式發布 (Provisioning)"],
+                "summary": "一鍵撤銷重置目前所有處於草稿暫存狀態的待發布修改內容",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "204": { "description": "暫存修訂已成功撤銷清空" } }
+            }
+        },
+        "/orgs/{org_id}/sec_policy": {
+            "post": {
+                "tags": ["9. 策略變更正式發布 (Provisioning)"],
+                "summary": "將累積的草稿安全策略正式變更發布 (Provision) 派發至實體防護主體代理",
+                "description": "完成此動作後，網路防護規則與微隔離安全防火牆才會在全網 VEN 上即時生效。",
+                "parameters": [{ "name": "org_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                "responses": { "201": { "description": "策略變更已正式發布並指派執行" } }
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "ApiKeyAuth": {
+                "type": "http",
+                "scheme": "basic",
+                "description": "利用自動化產出的 API Key_ID 搭配 Token 權杖進行 HTTP 基礎身分驗證。"
+            },
+            "SessionTokenAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "Authorization",
+                "description": "傳入由驗證端點換發的臨時會話標頭憑證令牌。"
+            }
+        }
+    }
+}
