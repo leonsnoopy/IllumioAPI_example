@@ -66,6 +66,18 @@ ILLUMIO_API_SECRET_TOKEN=token_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   ```
   *此命令會檢查所有 VEN 的連線狀態，若狀態不為 `active`，將自動發送電子郵件通知至 `.env` 中指定的收件者；若未設定 SMTP，則會於控制台輸出警報信件模擬。*
 
+* **互動式工作負載貼標功能**：
+  ```bash
+  python main.py tag
+  ```
+  *此命令會開啟一個互動式的精靈，引導您透過關鍵字篩選、勾選多台 Workload，再篩選、勾選多個 Label，最終進行批次套用。貼標時採取安全合併（Merge）邏輯，僅會更新有變動的維度，保留其餘舊標籤。*
+
+* **跨平台定期檢查排程管理**：
+  ```bash
+  python main.py schedule
+  ```
+  *此命令可在本機設定自動化排程。在 Windows 下自動整合「工作排程器 (schtasks)」，在 Linux/macOS 下則整合系統「crontab」，不佔用背景常駐記憶體。支援每分鐘、每小時、每天特定時間（格式 HH:MM）、每週特定星期與時間定時檢查，亦可由選單立即觸發背景任務進行測試。*
+
 > 📝 *提示：詳細的 API 呼叫資料與除錯資訊會完整儲存在 `illumio.log` 中，而控制台 (Console) 只會顯示重要的摘要資訊，並以表格形式列出前 10 筆資料。*
 
 

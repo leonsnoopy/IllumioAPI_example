@@ -227,5 +227,130 @@ class TestIllumioClient(unittest.TestCase):
         self.assertTrue({"href": "/orgs/1/labels/role-db"} in labels_sent)
         self.assertTrue({"href": "/orgs/1/labels/loc-us"} in labels_sent)
 
+    @patch('method.input')
+    @patch('subprocess.run')
+    @patch('sys.platform', 'win32')
+    def test_manage_schedule_windows_add(self, mock_run, mock_input):
+        # 1. Option 1 (Add/modify) -> Freq choice 1 (minute) -> Interval 15 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "1", "15", "5"]
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_res.stdout = "SUCCESS: Created."
+        mock_run.return_value = mock_res
+        
+        from method import manage_schedule
+        manage_schedule(self.client)
+        
+        create_call_args = None
+        for call in mock_run.call_args_list:
+            args = call[0][0]
+            if "schtasks" in args and "/create" in args:
+                create_call_args = args
+                break
+                
+        self.assertIsNotNone(create_call_args)
+        self.assertIn("Illumio_VEN_Check", create_call_args)
+        self.assertIn("minute", create_call_args)
+        self.assertIn("15", create_call_args)
+
+    @patch('method.input')
+    @patch('subprocess.run')
+    @patch('sys.platform', 'linux')
+    def test_manage_schedule_linux_add(self, mock_run, mock_input):
+        # 1. Option 1 (Add/modify) -> Freq choice 2 (hours) -> Interval 6 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "2", "6", "5"]
+        
+        mock_res_l = MagicMock()
+        mock_res_l.returncode = 0
+        mock_res_l.stdout = "* * * * * other_job\n"
+        
+        mock_res_write = MagicMock()
+        mock_res_write.returncode = 0
+        
+        mock_run.side_effect = [mock_res_l, mock_res_write]
+        
+        from method import manage_schedule
+        manage_schedule(self.client)
+        
+        self.assertEqual(mock_run.call_count, 2)
+        args, kwargs = mock_run.call_args_list[1]
+        self.assertEqual(args[0], ["crontab", "-"])
+        self.assertIn("0 */6 * * *", kwargs["input"])
+        self.assertIn("vens # Illumio_VEN_Check", kwargs["input"])
+        self.assertIn("other_job", kwargs["input"])
+
+    def test_validate_time(self):
+        from method import validate_time
+        self.assertTrue(validate_time("14:30"))
+        self.assertTrue(validate_time("00:00"))
+        self.assertTrue(validate_time("23:59"))
+        self.assertFalse(validate_time("24:00"))
+        self.assertFalse(validate_time("12:60"))
+        self.assertFalse(validate_time("abc"))
+        self.assertFalse(validate_time("9:30"))
+
+    def test_parse_weekdays(self):
+        from method import parse_weekdays
+        days, err = parse_weekdays("MON, FRI")
+        self.assertEqual(days, ["MON", "FRI"])
+        self.assertIsNone(err)
+        
+        days, err = parse_weekdays("mon,  tue")
+        self.assertEqual(days, ["MON", "TUE"])
+        
+        days, err = parse_weekdays("ABC")
+        self.assertIsNone(days)
+        self.assertIsNotNone(err)
+
+    @patch('method.input')
+    @patch('subprocess.run')
+    @patch('sys.platform', 'win32')
+    def test_manage_schedule_windows_weekly(self, mock_run, mock_input):
+        # Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "4", "MON, FRI", "14:30", "5"]
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        
+        from method import manage_schedule
+        manage_schedule(self.client)
+        
+        create_call_args = None
+        for call in mock_run.call_args_list:
+            args = call[0][0]
+            if "schtasks" in args and "/create" in args:
+                create_call_args = args
+                break
+                
+        self.assertIsNotNone(create_call_args)
+        self.assertIn("Illumio_VEN_Check", create_call_args)
+        self.assertIn("weekly", create_call_args)
+        self.assertIn("MON,FRI", create_call_args)
+        self.assertIn("14:30", create_call_args)
+
+    @patch('method.input')
+    @patch('subprocess.run')
+    @patch('sys.platform', 'linux')
+    def test_manage_schedule_linux_weekly(self, mock_run, mock_input):
+        # Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "4", "MON, FRI", "14:30", "5"]
+        
+        mock_res_l = MagicMock()
+        mock_res_l.returncode = 0
+        mock_res_l.stdout = ""
+        
+        mock_res_write = MagicMock()
+        mock_res_write.returncode = 0
+        
+        mock_run.side_effect = [mock_res_l, mock_res_write]
+        
+        from method import manage_schedule
+        manage_schedule(self.client)
+        
+        self.assertEqual(mock_run.call_count, 2)
+        args, kwargs = mock_run.call_args_list[1]
+        self.assertEqual(args[0], ["crontab", "-"])
+        self.assertIn("30 14 * * 1,5", kwargs["input"])
+
 if __name__ == '__main__':
     unittest.main()

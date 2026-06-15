@@ -516,3 +516,340 @@ def interactive_tagging(client, filter_val=None):
     except (KeyboardInterrupt, EOFError):
         print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
         return
+
+def validate_time(time_str):
+    """
+    Validates if a string is in HH:MM format (24-hour).
+    """
+    import re
+    if not re.match(r"^\d{2}:\d{2}$", time_str):
+        return False
+    try:
+        hh, mm = map(int, time_str.split(":"))
+        return 0 <= hh <= 23 and 0 <= mm <= 59
+    except ValueError:
+        return False
+
+def parse_weekdays(weekdays_str):
+    """
+    Parses and validates a comma-separated list of weekdays.
+    Returns (list of valid weekdays, error_msg).
+    """
+    valid_set = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
+    if not weekdays_str:
+        return None, "請輸入至少一個星期名稱。"
+    
+    parts = [p.strip().upper() for p in weekdays_str.replace(" ", ",").split(",")]
+    cleaned = []
+    for p in parts:
+        if not p:
+            continue
+        if p not in valid_set:
+            return None, f"無效的星期名稱: {p}。必須是 MON, TUE, WED, THU, FRI, SAT, SUN 之一。"
+        if p not in cleaned:
+            cleaned.append(p)
+            
+    if not cleaned:
+        return None, "未解析到任何有效的星期。"
+    return cleaned, None
+
+def manage_schedule(client, filter_val=None):
+    """
+    Manages periodic check scheduling on Windows (via schtasks) and Linux (via crontab).
+    Supports Daily start times, Weekly day selection, and immediate testing triggers.
+    """
+    import subprocess
+    import os
+    import sys
+
+    print_separator("排程管理 (Schedule Management)")
+    print("此功能可在本機設定定期檢查 VEN 狀態，並在發現異常時自動發送電子郵件通知。")
+
+    is_windows = sys.platform.startswith("win")
+    platform_name = "Windows" if is_windows else "Linux/macOS"
+    print(f"偵測到當前作業系統為: {platform_name}")
+
+    # sys.executable is the Python interpreter
+    # sys.argv[0] is main.py
+    main_py_path = os.path.abspath(sys.argv[0])
+    task_name = "Illumio_VEN_Check"
+
+    # Fallback to main.py path detection
+    if not main_py_path.endswith("main.py"):
+        possible_main = os.path.abspath("main.py")
+        if os.path.exists(possible_main):
+            main_py_path = possible_main
+        else:
+            main_py_path = os.path.join(os.getcwd(), "main.py")
+
+    # Command to run under task scheduler / cron
+    task_run_cmd = f'"{sys.executable}" "{main_py_path}" vens'
+
+    def win_add_modify():
+        print("\n請選擇定期檢查的頻率：")
+        print("  1. 每隔幾分鐘 (minutes)")
+        print("  2. 每隔幾小時 (hours)")
+        print("  3. 每天定時 (daily)")
+        print("  4. 每週定時 (weekly)")
+        
+        freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
+        if freq_choice not in ["1", "2", "3", "4"]:
+            print("[錯誤] 無效的選項，操作已取消。")
+            return
+            
+        if freq_choice == "1":
+            interval_str = input("請輸入間隔分鐘數 (正整數，例如 15 或 30): ").strip()
+            try:
+                interval = int(interval_str)
+                if interval <= 0:
+                    raise ValueError
+            except ValueError:
+                print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                return
+            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "minute", "/mo", str(interval), "/f"]
+            freq_desc = f"每隔 {interval} 分鐘"
+        elif freq_choice == "2":
+            interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
+            try:
+                interval = int(interval_str)
+                if interval <= 0:
+                    raise ValueError
+            except ValueError:
+                print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                return
+            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "hourly", "/mo", str(interval), "/f"]
+            freq_desc = f"每隔 {interval} 小時"
+        elif freq_choice == "3":
+            time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
+            if not validate_time(time_str):
+                print("[錯誤] 時間格式無效。必須為 HH:MM 且在 00:00 到 23:59 之間，操作已取消。")
+                return
+            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "daily", "/st", time_str, "/f"]
+            freq_desc = f"每天定時 {time_str}"
+        else:
+            days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
+            days, err = parse_weekdays(days_str)
+            if err:
+                print(f"[錯誤] {err}")
+                return
+            time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
+            if not validate_time(time_str):
+                print("[錯誤] 時間格式無效。操作已取消。")
+                return
+            days_formatted = ",".join(days)
+            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "weekly", "/d", days_formatted, "/st", time_str, "/f"]
+            freq_desc = f"每週 {days_formatted} 的 {time_str}"
+            
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            print(f"\n[成功] 已成功建立/更新 Windows 排程！")
+            print(f"  排程名稱：{task_name}")
+            print(f"  執行頻率：{freq_desc}")
+        except subprocess.CalledProcessError as err:
+            print(f"\n[失敗] 無法建立 Windows 排程：")
+            print(f"  Exit code: {err.returncode}")
+            print(f"  Stderr: {err.stderr.strip()}")
+
+    def win_list():
+        cmd = ["schtasks", "/query", "/tn", task_name, "/fo", "list"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            lines = res.stdout.splitlines()
+            print(f"\n當前 Windows 排程 '{task_name}' 的狀態：")
+            for line in lines:
+                if any(key in line for key in ["TaskName:", "Next Run Time:", "Status:", "Logon Mode:"]):
+                    print("  " + line.strip())
+        except subprocess.CalledProcessError:
+            print(f"\n[提示] 目前未在 Windows 中設定 '{task_name}' 的定期檢查排程。")
+
+    def win_delete():
+        cmd = ["schtasks", "/delete", "/tn", task_name, "/f"]
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            print(f"\n[成功] 已成功刪除 Windows 中的排程 '{task_name}'。")
+        except subprocess.CalledProcessError as err:
+            if "ERROR: The system cannot find the file specified" in err.stderr or "系統找不到指定的檔案" in err.stderr:
+                print(f"\n[提示] 找不到排程 '{task_name}'，可能本來就未設定。")
+            else:
+                print(f"\n[失敗] 刪除 Windows 排程時出錯：{err.stderr.strip()}")
+
+    def win_trigger_test():
+        print(f"\n正在向 Windows 排程器發送立即觸發任務 '{task_name}' 的指令...")
+        cmd = ["schtasks", "/run", "/tn", task_name]
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            print(f"[成功] 已成功觸發 Windows 背景排程！")
+            print("  - 任務已開始在背景運行。")
+            print("  - 您可以檢視 'illumio.log' 以確認最新執行結果，或檢查收件人信箱是否收到告警信。")
+        except subprocess.CalledProcessError as err:
+            print(f"[失敗] 無法觸發排程任務 (錯誤: {err.stderr.strip()})")
+            print(f"  提示: 請確認是否已建立排程。")
+
+    def linux_add_modify():
+        print("\n請選擇定期檢查的頻率：")
+        print("  1. 每隔幾分鐘 (minutes)")
+        print("  2. 每隔幾小時 (hours)")
+        print("  3. 每天定時 (daily)")
+        print("  4. 每週定時 (weekly)")
+        
+        freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
+        if freq_choice not in ["1", "2", "3", "4"]:
+            print("[錯誤] 無效的選項，操作已取消。")
+            return
+            
+        if freq_choice == "1":
+            interval_str = input("請輸入間隔分鐘數 (正整數，例如 15 或 30): ").strip()
+            try:
+                interval = int(interval_str)
+                if interval <= 0:
+                    raise ValueError
+            except ValueError:
+                print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                return
+            cron_expr = f"*/{interval} * * * *"
+            freq_desc = f"每隔 {interval} 分鐘"
+        elif freq_choice == "2":
+            interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
+            try:
+                interval = int(interval_str)
+                if interval <= 0:
+                    raise ValueError
+            except ValueError:
+                print("[錯誤] 請輸入有效的正整數，操作已取消。")
+                return
+            cron_expr = f"0 */{interval} * * *"
+            freq_desc = f"每隔 {interval} 小時"
+        elif freq_choice == "3":
+            time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
+            if not validate_time(time_str):
+                print("[錯誤] 時間格式無效。操作已取消。")
+                return
+            hh, mm = map(int, time_str.split(":"))
+            cron_expr = f"{mm} {hh} * * *"
+            freq_desc = f"每天定時 {time_str}"
+        else:
+            days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
+            days, err = parse_weekdays(days_str)
+            if err:
+                print(f"[錯誤] {err}")
+                return
+            time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
+            if not validate_time(time_str):
+                print("[錯誤] 時間格式無效。操作已取消。")
+                return
+            
+            hh, mm = map(int, time_str.split(":"))
+            day_map = {"MON": "1", "TUE": "2", "WED": "3", "THU": "4", "FRI": "5", "SAT": "6", "SUN": "0"}
+            cron_days = ",".join([day_map[d] for d in days])
+            
+            cron_expr = f"{mm} {hh} * * {cron_days}"
+            freq_desc = f"每週 {','.join(days)} 的 {time_str}"
+            
+        current_cron = ""
+        try:
+            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            if res.returncode == 0:
+                current_cron = res.stdout
+        except Exception:
+            pass
+            
+        cron_lines = current_cron.splitlines()
+        new_cron_lines = [line for line in cron_lines if f"# {task_name}" not in line]
+        
+        new_line = f'{cron_expr} "{sys.executable}" "{main_py_path}" vens # {task_name}'
+        new_cron_lines.append(new_line)
+        
+        new_cron_content = "\n".join(new_cron_lines) + "\n"
+        try:
+            subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
+            print(f"\n[成功] 已成功建立/更新 Linux crontab 排程！")
+            print(f"  排程項目：{new_line}")
+            print(f"  執行頻率：{freq_desc}")
+        except subprocess.CalledProcessError as err:
+            print(f"\n[失敗] 無法寫入 crontab (錯誤: {err.stderr.strip()})")
+
+    def linux_list():
+        try:
+            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程 (無 crontab)。")
+                return
+                
+            lines = res.stdout.splitlines()
+            matched_lines = [line for line in lines if f"# {task_name}" in line]
+            if not matched_lines:
+                print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程。")
+            else:
+                print(f"\n當前 Linux crontab 中的相關排程：")
+                for line in matched_lines:
+                    print(f"  {line}")
+        except Exception as e:
+            print(f"\n[錯誤] 查詢 crontab 時出錯: {e}")
+
+    def linux_delete():
+        try:
+            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"\n[提示] 找不到任何排程，目前沒有 crontab。")
+                return
+                
+            lines = res.stdout.splitlines()
+            new_lines = [line for line in lines if f"# {task_name}" not in line]
+            
+            has_other_jobs = any(line.strip() for line in new_lines)
+            
+            if not has_other_jobs:
+                subprocess.run(["crontab", "-r"], capture_output=True)
+                print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}' (crontab 已清空)。")
+            else:
+                new_cron_content = "\n".join(new_lines) + "\n"
+                subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
+                print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}'。")
+        except Exception as e:
+            print(f"\n[失敗] 刪除 Linux 排程時出錯: {e}")
+
+    def linux_trigger_test():
+        print(f"\n正在 Linux 上執行排程測試 (於前景執行 'python main.py vens')...")
+        try:
+            subprocess.run([sys.executable, main_py_path, "vens"], check=True)
+            print(f"[成功] 測試執行完成！已於前景輸出結果。")
+        except Exception as e:
+            print(f"[失敗] 執行測試任務時出錯: {e}")
+
+    try:
+        while True:
+            print_separator("排程管理選單")
+            print("  1. 新增或修改定期檢查排程")
+            print("  2. 查看現有排程狀態")
+            print("  3. 刪除定期檢查排程")
+            print("  4. 立即觸發排程的任務進行測試")
+            print("  5. 離開")
+            
+            choice = input("請輸入選項 (1/2/3/4/5): ").strip()
+            if choice == "1":
+                if is_windows:
+                    win_add_modify()
+                else:
+                    linux_add_modify()
+            elif choice == "2":
+                if is_windows:
+                    win_list()
+                else:
+                    linux_list()
+            elif choice == "3":
+                if is_windows:
+                    win_delete()
+                else:
+                    linux_delete()
+            elif choice == "4":
+                if is_windows:
+                    win_trigger_test()
+                else:
+                    linux_trigger_test()
+            elif choice == "5":
+                print("離開排程管理選單。")
+                break
+            else:
+                print("[提示] 無效的選項，請重新輸入。")
+    except (KeyboardInterrupt, EOFError):
+        print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
