@@ -6,6 +6,8 @@ __pycache__/
 # Environments & Sensitive Credentials
 .env
 .env.*
+!.env.example
+
 
 # Logs
 *.log

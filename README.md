@@ -1,6 +1,6 @@
 # Python Illumio API Client & Agent Skill
 
-此專案為根據 Illumio REST APIs 25.4 技術手冊所撰寫的 Python API 用戶端封裝。它不但可作為一個獨立的 Python 軟體套件，亦可作為 AI Agent 的「系統技能（Skill）/ 工具（Tool）」呼叫介面。
+此專案為根據 Illumio REST APIs 25.4 技術手冊所撰寫的 Python API 用戶端封裝。
 
 ## 🚀 特色與功能
 * **環境變數配置 (`config.py`)**：自動載入 `.env` 設定檔，避免密鑰直接寫入程式碼。
@@ -20,21 +20,60 @@
 
 ## 🛠️ 安裝與準備工作
 
-### 1. 安裝相依套件
-本用戶端需要 Python `requests` 函式庫。請確保您的系統已安裝：
+### 1. 系統需求與 Python 版本
+*   **建議 Python 版本**：Python `3.8` 或以上版本（支援至最新 Python `3.13`）。
+*   您可以從 [Python 官方網站](https://www.python.org/downloads/) 下載並安裝。安裝時請務必勾選 **"Add Python to PATH"** (將 Python 加入系統環境變數)。
+
+### 2. 建立與使用虛擬環境 (建議)
+為了避免套件版本衝突，建議為此專案建立獨立的虛擬環境 (Virtual Environment)。
+
+#### **Windows 系統：**
+1. 開啟命令提示字元 (CMD) 或 PowerShell，切換至專案根目錄。
+2. 建立虛擬環境 (資料夾名稱為 `venv`)：
+   ```bash
+   python -m venv venv
+   ```
+3. 啟用虛擬環境：
+   *   **CMD**:
+       ```cmd
+       venv\Scripts\activate
+       ```
+   *   **PowerShell**:
+       ```powershell
+       venv\Scripts\activate.ps1
+       ```
+       *(若出現執行原則錯誤，請先執行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`)*
+
+#### **macOS / Linux 系統：**
+1. 開啟終端機 (Terminal)，切換至專案根目錄。
+2. 建立虛擬環境：
+   ```bash
+   python3 -m venv venv
+   ```
+3. 啟用虛擬環境：
+   ```bash
+   source venv/bin/activate
+   ```
+
+*(啟用後，終端機提示字元前方會顯示 `(venv)`，代表目前已進入虛擬環境。若要退出，直接輸入 `deactivate` 即可。)*
+
+### 3. 安裝相依套件
+啟用虛擬環境後，請執行以下命令安裝專案所需的所有套件 (目前僅需 `requests` 函式庫)：
+```bash
+pip install -r requirements.txt
+```
+或直接安裝：
 ```bash
 pip install requests
 ```
 
-### 2. 設定環境變數 `.env`
-在專案根目錄下建立一個名為 `.env` 的檔案，內容如下：
-```ini
-ILLUMIO_PCE_FQDN=pce.my-company.com
-ILLUMIO_PCE_PORT=8443
-ILLUMIO_ORG_ID=1
-ILLUMIO_API_KEY_ID=api_xxxxxxxxxxxxxxxxxxxx
-ILLUMIO_API_SECRET_TOKEN=token_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+### 4. 設定環境變數 `.env`
+專案內附帶了一個環境變數範本檔 [.env.example](file:///c:/Users/U/Documents/Dev/IllumioAPI_example/.env.example)。請複製該檔案並命名為 `.env`：
+*   **Windows (CMD/PowerShell)**: `copy .env.example .env`
+*   **macOS / Linux**: `cp .env.example .env`
+
+接著編輯 `.env`，填入您的 Illumio PCE 與郵件伺服器相關設定。
+
 > 💡 *提示：在測試或開發環境中，如果您使用的是 PCE 自建 self-signed 憑證，用戶端預設的 `verify_ssl=False` 可以讓您免除證書不信任的錯誤。*
 
 ---
@@ -80,72 +119,15 @@ ILLUMIO_API_SECRET_TOKEN=token_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 > 📝 *提示：詳細的 API 呼叫資料與除錯資訊會完整儲存在 `illumio.log` 中，而控制台 (Console) 只會顯示重要的摘要資訊，並以表格形式列出前 10 筆資料。*
 
-
-### 程式碼整合
-```python
-from illumio_client import IllumioClient
-
-# 初始化 Client 
-client = IllumioClient(
-    pce_fqdn="pce.my-company.com",
-    api_key_id="api_xxx",
-    api_secret_token="token_xxx",
-    pce_port=8443,
-    org_id=1,
-    verify_ssl=False
-)
-
-# 獲取標籤列表
-labels = client.get_labels(value="Web")
-for label in labels:
-    print(f"Label: {label['key']} = {label['value']}")
-```
-
 ---
 
-## 🤖 如何作為 AI Agent Skill (工具) 使用
-
-此用戶端可作為 AI Agent (如 LangChain, AutoGen 或自製 LLM Agent) 的一個 Tool 集合。以下是向 AI Agent 描述此工具的 Spec 定義：
-
-### 工具描述規範 (Tool Schema)
-```json
-{
-  "name": "illumio_api_client",
-  "description": "呼叫 Illumio PCE API 執行健康度檢查、管理主機工作負載與微隔離安全標籤。",
-  "functions": [
-    {
-      "name": "check_health",
-      "description": "檢查 PCE 的健康與運作狀態。無須參數。"
-    },
-    {
-      "name": "get_workloads",
-      "description": "查詢受管與非受管的主機工作負載清單。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "representation": {
-            "type": "string",
-            "description": "進階擴展查詢，例如傳入 'workload_labels_vulnerabilities' 同時加載標籤與漏洞資訊。"
-          }
-        }
-      }
-    },
-    {
-      "name": "get_labels",
-      "description": "查詢 PCE 的微隔離標籤。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "value": {
-            "type": "string",
-            "description": "模糊查詢標籤名稱（例如 'Web' 或 'Prod'）。"
-          }
-        }
-      }
-    }
-  ]
-}
+## 📧 執行郵件警報測試 (Email Alert Test)
+為了驗證異常 VEN 郵件發送排版與連線設定，您可以直接執行測試程式：
+```bash
+python test_email.py
 ```
+*   **若未配置 SMTP**：控制台將輸出精美的電子郵件模擬排版。
+*   **若已配置 SMTP**：將會透過您的郵件伺服器寄送測試信至指定的收件者。
 
 ---
 
@@ -163,13 +145,5 @@ Ran 6 tests in 0.015s
 OK
 ```
 
----
 
-## 📧 執行郵件警報測試 (Email Alert Test)
-為了驗證異常 VEN 郵件發送排版與連線設定，您可以直接執行測試程式：
-```bash
-python test_email.py
-```
-*   **若未配置 SMTP**：控制台將輸出精美的電子郵件模擬排版。
-*   **若已配置 SMTP**：將會透過您的郵件伺服器寄送測試信至指定的收件者。
 
