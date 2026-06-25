@@ -1,91 +1,31 @@
 import json
 import logging
 import sys
-import smtplib
-from email.mime.text import MIMEText
-from email.header import Header
 import config
+from utils import reconfigure_stdout, print_separator, parse_selection_indices, validate_time, parse_weekdays, convert_utc_to_taiwan_time, get_event_description
+from notifier import EmailNotifier
+from scheduler import get_scheduler
 
-# Reconfigure stdout to use utf-8 to prevent encoding issues on Windows consoles
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        import io
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Reconfigure stdout to use UTF-8 to prevent encoding issues on Windows consoles
+reconfigure_stdout()
 
 logger = logging.getLogger("illumio_client")
 
-def print_separator(title):
-    print("\n" + "=" * 60)
-    print(f" {title} ".center(60, "="))
-    print("=" * 60)
 
 def send_email_notification(abnormal_vens):
-    """Sends an email notification if there are abnormal VENs."""
-    if not config.EMAIL_RECEIVER:
-        logger.warning("Email receiver not configured, skipping email notification.")
-        print("[警告] 未設定收件者信箱 (EMAIL_RECEIVER)，無法寄送通知。")
-        return
-        
-    subject = "【警告】Illumio PCE 偵測到異常 VEN 狀態"
-    
-    # Construct email content
-    body = "偵測到以下 VEN 狀態異常，請儘速確認：\n\n"
-    body += f"{'Hostname':<25} {'Status':<15} {'HREF':<40}\n"
-    body += "-" * 80 + "\n"
-    for ven in abnormal_vens:
-        hostname = ven.get("hostname") or "N/A"
-        status = ven.get("status") or "N/A"
-        href = ven.get("href") or "N/A"
-        body += f"{hostname:<25} {status:<15} {href:<40}\n"
-    
-    # If SMTP is configured
-    if config.SMTP_SERVER:
-        try:
-            msg = MIMEText(body, 'plain', 'utf-8')
-            msg['Subject'] = Header(subject, 'utf-8')
-            sender = config.EMAIL_SENDER or "auto_reply@illumio_client.com"
-            msg['From'] = sender
-            msg['To'] = config.EMAIL_RECEIVER
-            
-            # Send via SMTP with connection timeout
-            logger.info(f"Connecting to SMTP server {config.SMTP_SERVER}:{config.SMTP_PORT}...")
-            with smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT, timeout=10) as server:
-                # 1. Optionally attempt STARTTLS if port is 587
-                if config.SMTP_PORT == 587:
-                    try:
-                        server.starttls()
-                    except Exception as tls_err:
-                        logger.warning(f"STARTTLS not supported or failed: {tls_err}")
-                
-                # 2. Optionally login if SMTP_USER is configured and not 'false'/'none'
-                smtp_user = config.SMTP_USER
-                smtp_pass = config.SMTP_PASSWORD
-                has_auth = smtp_user and smtp_user.lower() not in ("false", "none", "")
-                
-                if has_auth:
-                    logger.info(f"Authenticating as {smtp_user}...")
-                    server.login(smtp_user, smtp_pass)
-                else:
-                    logger.info("SMTP authentication skipped (no credentials provided).")
-                
-                receivers = [r.strip() for r in config.EMAIL_RECEIVER.split(",")]
-                server.sendmail(sender, receivers, msg.as_string())
-            
-            logger.info(f"Notification email successfully sent to {config.EMAIL_RECEIVER}.")
-            print(f"郵件通知: 已成功寄送至 {config.EMAIL_RECEIVER}")
-        except Exception as e:
-            logger.error(f"Failed to send notification email: {e}", exc_info=True)
-            print(f"郵件通知: 寄送失敗 (錯誤: {e})")
-    else:
-        # Mock mode if SMTP is not configured
-        print("\n" + "!" * 60)
-        print("【郵件發送模擬】(SMTP 未完整配置，僅印出信件內容)")
-        print(f"收件者: {config.EMAIL_RECEIVER}")
-        print(f"主旨: {subject}")
-        print(f"內容:\n{body}")
-        print("!" * 60)
+    """
+    Sends an email notification if there are abnormal VENs.
+    Delegates to the EmailNotifier service using global configuration options.
+    """
+    notifier = EmailNotifier(
+        smtp_server=config.SMTP_SERVER,
+        smtp_port=config.SMTP_PORT,
+        smtp_user=config.SMTP_USER,
+        smtp_password=config.SMTP_PASSWORD,
+        email_sender=config.EMAIL_SENDER,
+        email_receiver=config.EMAIL_RECEIVER
+    )
+    return notifier.send_abnormal_vens_alert(abnormal_vens)
 
 
 def check_health(client, filter_val=None):
@@ -114,6 +54,7 @@ def check_health(client, filter_val=None):
         logger.error(f"Failed to check PCE health: {e}", exc_info=True)
         print(f"健康狀態: 異常 (錯誤: {e})")
         return None
+
 
 def get_labels(client, filter_val=None):
     """Retrieves and displays security labels, showing up to 10 entries on console."""
@@ -154,6 +95,7 @@ def get_labels(client, filter_val=None):
         logger.error(f"Failed to retrieve labels: {e}", exc_info=True)
         print(f"安全標籤: 取得失敗 (錯誤: {e})")
         return None
+
 
 def get_workloads(client, filter_val=None):
     """Retrieves and displays workloads, showing up to 10 entries on console."""
@@ -199,6 +141,7 @@ def get_workloads(client, filter_val=None):
         logger.error(f"Failed to retrieve workloads: {e}", exc_info=True)
         print(f"工作負載: 取得失敗 (錯誤: {e})")
         return None
+
 
 def get_vens(client, filter_val=None):
     """Retrieves VENs, displays their statuses, and triggers email notifications for abnormal VENs."""
@@ -263,37 +206,6 @@ def get_vens(client, filter_val=None):
         print(f"VEN 資訊: 取得失敗 (錯誤: {e})")
         return None
 
-def parse_selection_indices(input_str, max_val):
-    """
-    Parses a string of comma-separated or space-separated numbers and ranges (e.g. '1, 2, 4-6').
-    Returns a sorted list of unique valid 1-based indices.
-    """
-    indices = set()
-    # Replace space delimiters with commas
-    normalized = input_str.replace(" ", ",")
-    parts = normalized.split(",")
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            try:
-                start_str, end_str = part.split("-", 1)
-                start_i = int(start_str.strip())
-                end_i = int(end_str.strip())
-                for i in range(min(start_i, end_i), max(start_i, end_i) + 1):
-                    if 1 <= i <= max_val:
-                        indices.add(i)
-            except ValueError:
-                pass
-        else:
-            try:
-                i = int(part)
-                if 1 <= i <= max_val:
-                    indices.add(i)
-            except ValueError:
-                pass
-    return sorted(list(indices))
 
 def interactive_tagging(client, filter_val=None):
     """
@@ -391,7 +303,6 @@ def interactive_tagging(client, filter_val=None):
                 print("取消操作。離開功能。")
                 logger.info("取消工作負載貼標流程。離開。")
                 return
-            # If option 1 or other input, loop again
             
         # ----------------------------------------------------
         # 第二階段：挑選 Label
@@ -544,76 +455,21 @@ def interactive_tagging(client, filter_val=None):
         logger.info("互動貼標操作已被使用者中斷 (KeyboardInterrupt/EOFError)。")
         return
 
-def validate_time(time_str):
-    """
-    Validates if a string is in HH:MM format (24-hour).
-    """
-    import re
-    if not re.match(r"^\d{2}:\d{2}$", time_str):
-        return False
-    try:
-        hh, mm = map(int, time_str.split(":"))
-        return 0 <= hh <= 23 and 0 <= mm <= 59
-    except ValueError:
-        return False
-
-def parse_weekdays(weekdays_str):
-    """
-    Parses and validates a comma-separated list of weekdays.
-    Returns (list of valid weekdays, error_msg).
-    """
-    valid_set = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
-    if not weekdays_str:
-        return None, "請輸入至少一個星期名稱。"
-    
-    parts = [p.strip().upper() for p in weekdays_str.replace(" ", ",").split(",")]
-    cleaned = []
-    for p in parts:
-        if not p:
-            continue
-        if p not in valid_set:
-            return None, f"無效的星期名稱: {p}。必須是 MON, TUE, WED, THU, FRI, SAT, SUN 之一。"
-        if p not in cleaned:
-            cleaned.append(p)
-            
-    if not cleaned:
-        return None, "未解析到任何有效的星期。"
-    return cleaned, None
 
 def manage_schedule(client, filter_val=None):
     """
-    Manages periodic check scheduling on Windows (via schtasks) and Linux (via crontab).
-    Supports Daily start times, Weekly day selection, and immediate testing triggers.
+    Manages periodic check scheduling by delegating to the platform-specific scheduler service.
     """
-    import subprocess
-    import os
-    import sys
-
     logger.info("使用者啟動了『排程管理功能 (manage_schedule)』")
     print_separator("排程管理 (Schedule Management)")
     print("此功能可在本機設定定期檢查 VEN 狀態，並在發現異常時自動發送電子郵件通知。")
 
+    scheduler = get_scheduler()
     is_windows = sys.platform.startswith("win")
     platform_name = "Windows" if is_windows else "Linux/macOS"
     print(f"偵測到當前作業系統為: {platform_name}")
 
-    # sys.executable is the Python interpreter
-    # sys.argv[0] is main.py
-    main_py_path = os.path.abspath(sys.argv[0])
-    task_name = "Illumio_VEN_Check"
-
-    # Fallback to main.py path detection
-    if not main_py_path.endswith("main.py"):
-        possible_main = os.path.abspath("main.py")
-        if os.path.exists(possible_main):
-            main_py_path = possible_main
-        else:
-            main_py_path = os.path.join(os.getcwd(), "main.py")
-
-    # Command to run under task scheduler / cron
-    task_run_cmd = f'"{sys.executable}" "{main_py_path}" vens'
-
-    def win_add_modify():
+    def add_modify_menu():
         print("\n請選擇定期檢查的頻率：")
         print("  1. 每隔幾分鐘 (minutes)")
         print("  2. 每隔幾小時 (hours)")
@@ -621,10 +477,9 @@ def manage_schedule(client, filter_val=None):
         print("  4. 每週定時 (weekly)")
         
         freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
-        logger.info(f"Windows 新增/修改排程：頻率選擇='{freq_choice}'")
+        logger.info(f"新增/修改排程：頻率選擇='{freq_choice}'")
         if freq_choice not in ["1", "2", "3", "4"]:
             print("[錯誤] 無效的選項，操作已取消。")
-            logger.info("Windows 新增/修改排程：使用者輸入無效選項，操作已取消。")
             return
             
         if freq_choice == "1":
@@ -635,11 +490,8 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
-                logger.info(f"Windows 新增/修改排程：使用者輸入無效的間隔分鐘數 '{interval_str}'")
                 return
-            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "minute", "/mo", str(interval), "/f"]
-            freq_desc = f"每隔 {interval} 分鐘"
-            logger.info(f"設定 Windows 排程：{freq_desc}")
+            scheduler.add_or_modify("minute", interval)
         elif freq_choice == "2":
             interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
             try:
@@ -648,255 +500,25 @@ def manage_schedule(client, filter_val=None):
                     raise ValueError
             except ValueError:
                 print("[錯誤] 請輸入有效的正整數，操作已取消。")
-                logger.info(f"Windows 新增/修改排程：使用者輸入無效的間隔小時數 '{interval_str}'")
                 return
-            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "hourly", "/mo", str(interval), "/f"]
-            freq_desc = f"每隔 {interval} 小時"
-            logger.info(f"設定 Windows 排程：{freq_desc}")
+            scheduler.add_or_modify("hourly", interval)
         elif freq_choice == "3":
             time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。必須為 HH:MM 且在 00:00 到 23:59 之間，操作已取消。")
-                logger.info(f"Windows 新增/修改排程：使用者輸入無效的每日時間 '{time_str}'")
                 return
-            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "daily", "/st", time_str, "/f"]
-            freq_desc = f"每天定時 {time_str}"
-            logger.info(f"設定 Windows 排程：{freq_desc}")
+            scheduler.add_or_modify("daily", time_str)
         else:
             days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
             days, err = parse_weekdays(days_str)
             if err:
                 print(f"[錯誤] {err}")
-                logger.info(f"Windows 新增/修改排程：使用者輸入無效的星期 '{days_str}' (錯誤: {err})")
                 return
             time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
             if not validate_time(time_str):
                 print("[錯誤] 時間格式無效。操作已取消。")
-                logger.info(f"Windows 新增/修改排程：使用者輸入無效的執行時間 '{time_str}'")
                 return
-            days_formatted = ",".join(days)
-            cmd = ["schtasks", "/create", "/tn", task_name, "/tr", task_run_cmd, "/sc", "weekly", "/d", days_formatted, "/st", time_str, "/f"]
-            freq_desc = f"每週 {days_formatted} 的 {time_str}"
-            logger.info(f"設定 Windows 排程：{freq_desc}")
-            
-        try:
-            logger.info(f"執行 Windows 建立排程指令: {' '.join(cmd)}")
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print(f"\n[成功] 已成功建立/更新 Windows 排程！")
-            print(f"  排程名稱：{task_name}")
-            print(f"  執行頻率：{freq_desc}")
-            logger.info(f"Windows 排程建立/更新成功: {freq_desc}")
-        except subprocess.CalledProcessError as err:
-            print(f"\n[失敗] 無法建立 Windows 排程：")
-            print(f"  Exit code: {err.returncode}")
-            print(f"  Stderr: {err.stderr.strip()}")
-            logger.error(f"Windows 排程建立/更新失敗, Exit code: {err.returncode}, Error: {err.stderr.strip()}")
-
-    def win_list():
-        cmd = ["schtasks", "/query", "/tn", task_name, "/fo", "list"]
-        try:
-            logger.info(f"執行 Windows 查詢排程指令: {' '.join(cmd)}")
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            lines = res.stdout.splitlines()
-            print(f"\n當前 Windows 排程 '{task_name}' 的狀態：")
-            for line in lines:
-                if any(key in line for key in ["TaskName:", "Next Run Time:", "Status:", "Logon Mode:"]):
-                    print("  " + line.strip())
-            logger.info("Windows 排程查詢成功")
-        except subprocess.CalledProcessError:
-            print(f"\n[提示] 目前未在 Windows 中設定 '{task_name}' 的定期檢查排程。")
-            logger.info("Windows 排程查詢結果：目前未設定該排程。")
-
-    def win_delete():
-        cmd = ["schtasks", "/delete", "/tn", task_name, "/f"]
-        try:
-            logger.info(f"執行 Windows 刪除排程指令: {' '.join(cmd)}")
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print(f"\n[成功] 已成功刪除 Windows 中的排程 '{task_name}'。")
-            logger.info(f"Windows 排程 '{task_name}' 刪除成功。")
-        except subprocess.CalledProcessError as err:
-            if "ERROR: The system cannot find the file specified" in err.stderr or "系統找不到指定的檔案" in err.stderr:
-                print(f"\n[提示] 找不到排程 '{task_name}'，可能本來就未設定。")
-                logger.info(f"Windows 刪除排程：找不到排程 '{task_name}'，可能本來就未設定。")
-            else:
-                print(f"\n[失敗] 刪除 Windows 排程時出錯：{err.stderr.strip()}")
-                logger.error(f"Windows 刪除排程失敗: {err.stderr.strip()}")
-
-    def win_trigger_test():
-        print(f"\n正在向 Windows 排程器發送立即觸發任務 '{task_name}' 的指令...")
-        cmd = ["schtasks", "/run", "/tn", task_name]
-        try:
-            logger.info(f"執行 Windows 立即觸發背景排程指令: {' '.join(cmd)}")
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print(f"[成功] 已成功觸發 Windows 背景排程！")
-            print("  - 任務已開始在背景運行。")
-            print("  - 您可以檢視 'illumio.log' 以確認最新執行結果，或檢查收件人信箱是否收到告警信。")
-            logger.info("Windows 背景排程觸發成功。")
-        except subprocess.CalledProcessError as err:
-            print(f"[失敗] 無法觸發排程任務 (錯誤: {err.stderr.strip()})")
-            print(f"  提示: 請確認是否已建立排程。")
-            logger.error(f"Windows 觸發背景排程失敗: {err.stderr.strip()}")
-
-    def linux_add_modify():
-        print("\n請選擇定期檢查的頻率：")
-        print("  1. 每隔幾分鐘 (minutes)")
-        print("  2. 每隔幾小時 (hours)")
-        print("  3. 每天定時 (daily)")
-        print("  4. 每週定時 (weekly)")
-        
-        freq_choice = input("選擇頻率 (1/2/3/4): ").strip()
-        logger.info(f"Linux 新增/修改排程：頻率選擇='{freq_choice}'")
-        if freq_choice not in ["1", "2", "3", "4"]:
-            print("[錯誤] 無效的選項，操作已取消。")
-            logger.info("Linux 新增/修改排程：使用者輸入無效選項，操作已取消。")
-            return
-            
-        if freq_choice == "1":
-            interval_str = input("請輸入間隔分鐘數 (正整數，例如 15 或 30): ").strip()
-            try:
-                interval = int(interval_str)
-                if interval <= 0:
-                    raise ValueError
-            except ValueError:
-                print("[錯誤] 請輸入有效的正整數，操作已取消。")
-                logger.info(f"Linux 新增/修改排程：使用者輸入無效的間隔分鐘數 '{interval_str}'")
-                return
-            cron_expr = f"*/{interval} * * * *"
-            freq_desc = f"每隔 {interval} 分鐘"
-            logger.info(f"設定 Linux 排程：{freq_desc}")
-        elif freq_choice == "2":
-            interval_str = input("請輸入間隔小時數 (正整數，例如 2 或 12): ").strip()
-            try:
-                interval = int(interval_str)
-                if interval <= 0:
-                    raise ValueError
-            except ValueError:
-                print("[錯誤] 請輸入有效的正整數，操作已取消。")
-                logger.info(f"Linux 新增/修改排程：使用者輸入無效的間隔小時數 '{interval_str}'")
-                return
-            cron_expr = f"0 */{interval} * * *"
-            freq_desc = f"每隔 {interval} 小時"
-            logger.info(f"設定 Linux 排程：{freq_desc}")
-        elif freq_choice == "3":
-            time_str = input("請輸入每日執行時間 (格式 HH:MM，例如 14:30): ").strip()
-            if not validate_time(time_str):
-                print("[錯誤] 時間格式無效。操作已取消。")
-                logger.info(f"Linux 新增/修改排程：使用者輸入無效的每日時間 '{time_str}'")
-                return
-            hh, mm = map(int, time_str.split(":"))
-            cron_expr = f"{mm} {hh} * * *"
-            freq_desc = f"每天定時 {time_str}"
-            logger.info(f"設定 Linux 排程：{freq_desc}")
-        else:
-            days_str = input("請輸入每週執行的星期 (多選請以逗號分隔，例如 MON, FRI 或 SUN): ").strip()
-            days, err = parse_weekdays(days_str)
-            if err:
-                print(f"[錯誤] {err}")
-                logger.info(f"Linux 新增/修改排程：使用者輸入無效的星期 '{days_str}' (錯誤: {err})")
-                return
-            time_str = input("請輸入執行時間 (格式 HH:MM，例如 14:30): ").strip()
-            if not validate_time(time_str):
-                print("[錯誤] 時間格式無效。操作已取消。")
-                logger.info(f"Linux 新增/修改排程：使用者輸入無效的執行時間 '{time_str}'")
-                return
-            
-            hh, mm = map(int, time_str.split(":"))
-            day_map = {"MON": "1", "TUE": "2", "WED": "3", "THU": "4", "FRI": "5", "SAT": "6", "SUN": "0"}
-            cron_days = ",".join([day_map[d] for d in days])
-            
-            cron_expr = f"{mm} {hh} * * {cron_days}"
-            freq_desc = f"每週 {','.join(days)} 的 {time_str}"
-            logger.info(f"設定 Linux 排程：{freq_desc}")
-            
-        current_cron = ""
-        try:
-            logger.info("執行 Linux crontab -l 查詢當前排程以進行備份/更新")
-            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            if res.returncode == 0:
-                current_cron = res.stdout
-        except Exception as e:
-            logger.warning(f"Linux crontab -l 查詢失敗或無現有排程: {e}")
-            
-        cron_lines = current_cron.splitlines()
-        new_cron_lines = [line for line in cron_lines if f"# {task_name}" not in line]
-        
-        new_line = f'{cron_expr} "{sys.executable}" "{main_py_path}" vens # {task_name}'
-        new_cron_lines.append(new_line)
-        
-        new_cron_content = "\n".join(new_cron_lines) + "\n"
-        try:
-            logger.info(f"更新 Linux crontab 內容，新項目: {new_line}")
-            subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
-            print(f"\n[成功] 已成功建立/更新 Linux crontab 排程！")
-            print(f"  排程項目：{new_line}")
-            print(f"  執行頻率：{freq_desc}")
-            logger.info(f"Linux crontab 排程更新成功: {freq_desc}")
-        except subprocess.CalledProcessError as err:
-            print(f"\n[失敗] 無法寫入 crontab (錯誤: {err.stderr.strip()})")
-            logger.error(f"Linux crontab 排程更新失敗, Error: {err.stderr.strip()}")
-
-    def linux_list():
-        try:
-            logger.info("執行 Linux crontab -l 查詢排程")
-            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            if res.returncode != 0:
-                print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程 (無 crontab)。")
-                logger.info("Linux crontab 查詢結果：目前未設定 crontab 排程。")
-                return
-                
-            lines = res.stdout.splitlines()
-            matched_lines = [line for line in lines if f"# {task_name}" in line]
-            if not matched_lines:
-                print(f"\n[提示] 目前未在 Linux 中設定 '{task_name}' 的定期檢查排程。")
-                logger.info("Linux crontab 查詢結果：目前無相關排程項目。")
-            else:
-                print(f"\n當前 Linux crontab 中的相關排程：")
-                for line in matched_lines:
-                    print(f"  {line}")
-                logger.info("Linux crontab 查詢成功。")
-        except Exception as e:
-            print(f"\n[錯誤] 查詢 crontab 時出錯: {e}")
-            logger.error(f"Linux 查詢 crontab 時出錯: {e}")
-
-    def linux_delete():
-        try:
-            logger.info("執行 Linux crontab -l 讀取排程以進行刪除")
-            res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            if res.returncode != 0:
-                print(f"\n[提示] 找不到排程，目前沒有 crontab。")
-                logger.info("Linux 刪除排程：找不到任何排程，目前沒有 crontab。")
-                return
-                
-            lines = res.stdout.splitlines()
-            new_lines = [line for line in lines if f"# {task_name}" not in line]
-            
-            has_other_jobs = any(line.strip() for line in new_lines)
-            
-            if not has_other_jobs:
-                logger.info("執行 Linux crontab -r 清空 crontab")
-                subprocess.run(["crontab", "-r"], capture_output=True)
-                print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}' (crontab 已清空)。")
-                logger.info(f"Linux crontab 中的排程 '{task_name}' 刪除成功（且 crontab 已完全清空）。")
-            else:
-                new_cron_content = "\n".join(new_lines) + "\n"
-                logger.info("執行 Linux crontab - 更新排程項目")
-                subprocess.run(["crontab", "-"], input=new_cron_content, capture_output=True, text=True, check=True)
-                print(f"\n[成功] 已成功刪除 Linux crontab 中的排程 '{task_name}'。")
-                logger.info(f"Linux crontab 中的排程 '{task_name}' 刪除成功。")
-        except Exception as e:
-            print(f"\n[失敗] 刪除 Linux 排程時出錯: {e}")
-            logger.error(f"Linux 刪除排程失敗: {e}")
-
-    def linux_trigger_test():
-        logger.info(f"執行 Linux 前景排程測試指令: {sys.executable} {main_py_path} vens")
-        print(f"\n正在 Linux 上執行排程測試 (於前景執行 'python main.py vens')...")
-        try:
-            subprocess.run([sys.executable, main_py_path, "vens"], check=True)
-            print(f"[成功] 測試執行完成！已於前景輸出結果。")
-            logger.info("Linux 前景排程測試執行成功。")
-        except Exception as e:
-            print(f"[失敗] 執行測試任務時出錯: {e}")
-            logger.error(f"Linux 前景排程測試執行失敗: {e}")
+            scheduler.add_or_modify("weekly", time_str, weekdays=days)
 
     try:
         while True:
@@ -910,32 +532,134 @@ def manage_schedule(client, filter_val=None):
             choice = input("請輸入選項 (1/2/3/4/5): ").strip()
             logger.info(f"排程管理選單選擇: '{choice}'")
             if choice == "1":
-                if is_windows:
-                    win_add_modify()
-                else:
-                    linux_add_modify()
+                add_modify_menu()
             elif choice == "2":
-                if is_windows:
-                    win_list()
-                else:
-                    linux_list()
+                scheduler.list_jobs()
             elif choice == "3":
-                if is_windows:
-                    win_delete()
-                else:
-                    linux_delete()
+                scheduler.delete_job()
             elif choice == "4":
-                if is_windows:
-                    win_trigger_test()
-                else:
-                    linux_trigger_test()
+                scheduler.trigger_test()
             elif choice == "5":
                 print("離開排程管理選單。")
                 logger.info("離開排程管理選單。")
                 break
             else:
                 print("[提示] 無效的選項，請重新輸入。")
-                logger.info(f"排程管理選單：輸入了無效選項 '{choice}'")
     except (KeyboardInterrupt, EOFError):
         print("\n\n[提示] 互動操作已被使用者中斷，離開功能。")
         logger.info("排程管理操作已被使用者中斷 (KeyboardInterrupt/EOFError)。")
+
+
+def get_events(client, filter_val=None, notify_emails=None):
+    """Retrieves and displays system events, showing up to 10 entries by default, or 20 entries when filtered."""
+    print_separator("Get System Audit Events")
+    
+    # Decide max records based on filter presence
+    max_results = 20 if filter_val else 10
+    logger.info(f"Executing get_events (filter: {filter_val}, max_results: {max_results})...")
+    
+    status = None
+    severity = None
+    event_type = None
+    
+    if filter_val:
+        # Check if filter contains key-value pairs (e.g. status=success severity=info)
+        import re
+        pairs = re.split(r'[,; ]+', filter_val)
+        has_kv = False
+        for pair in pairs:
+            if '=' in pair:
+                k, v = pair.split('=', 1)
+                k_clean = k.strip().lower()
+                v_clean = v.strip()
+                if k_clean == 'status':
+                    status = v_clean
+                    has_kv = True
+                elif k_clean == 'severity':
+                    severity = v_clean
+                    if severity.lower() == 'error':
+                        severity = 'err'
+                    has_kv = True
+                elif k_clean in ('event_type', 'event_name', 'type'):
+                    event_type = v_clean
+                    has_kv = True
+        
+        # Fallback to smart detection if no key-value pairs are provided
+        if not has_kv:
+            val_lower = filter_val.strip().lower()
+            if val_lower in ('success', 'failure'):
+                status = val_lower
+            elif val_lower in ('warning', 'err', 'error', 'info', 'emerg', 'alert', 'crit', 'notice', 'debug'):
+                severity = 'err' if val_lower == 'error' else val_lower
+            else:
+                event_type = filter_val.strip()
+                
+    # Build filter log message
+    filter_logs = []
+    if status: filter_logs.append(f"status: '{status}'")
+    if severity: filter_logs.append(f"severity: '{severity}'")
+    if event_type: filter_logs.append(f"event_type: '{event_type}'")
+    if filter_logs:
+        print(f"篩選條件: {', '.join(filter_logs)}")
+        
+    try:
+        events = client.get_events(status=status, severity=severity, event_type=event_type, max_results=max_results)
+        logger.debug(f"Retrieved {len(events)} events details: {json.dumps(events, ensure_ascii=False)}")
+        
+        total_count = len(events)
+        print(f"系統事件: 成功取得 {total_count} 筆事件記錄")
+        
+        if total_count > 0:
+            print(f"\n顯示前 {total_count} 筆事件資訊:")
+            # Column widths: No(4), Timestamp(20), Event Type(25), Severity(10), Status(10), Created By(16), Description
+            print(f"{'No.':<4} {'Timestamp':<20} {'Event Type':<25} {'Severity':<10} {'Status':<10} {'Created By':<16} {'Description'}")
+            print("-" * 115)
+            for idx, event in enumerate(events, 1):
+                timestamp = event.get("timestamp") or "N/A"
+                if timestamp != "N/A":
+                    timestamp = convert_utc_to_taiwan_time(timestamp)
+                etype = event.get("event_type") or "N/A"
+                sev = event.get("severity") or "N/A"
+                stat = event.get("status") or "N/A"
+                desc = get_event_description(event)
+                
+                # Get creator details
+                created_by_data = event.get("created_by", {})
+                creator = "N/A"
+                if "user" in created_by_data:
+                    creator = created_by_data["user"].get("username") or created_by_data["user"].get("email") or "User"
+                elif "agent" in created_by_data:
+                    creator = "Agent"
+                elif "system" in created_by_data:
+                    creator = "System"
+                    
+                # Truncate values if too long for column width
+                if len(etype) > 23:
+                    etype = etype[:20] + "..."
+                if len(timestamp) > 19:
+                    timestamp = timestamp[:19]
+                if len(creator) > 14:
+                    creator = creator[:12] + "..."
+                    
+                print(f"{idx:<4} {timestamp:<20} {etype:<25} {sev:<10} {stat:<10} {creator:<16} {desc}")
+        # Send email notification if notify_emails is provided (not None)
+        if notify_emails is not None:
+            receiver = notify_emails
+            if not isinstance(receiver, str) or not receiver.strip():
+                receiver = config.EMAIL_RECEIVER
+            
+            notifier = EmailNotifier(
+                smtp_server=config.SMTP_SERVER,
+                smtp_port=config.SMTP_PORT,
+                smtp_user=config.SMTP_USER,
+                smtp_password=config.SMTP_PASSWORD,
+                email_sender=config.EMAIL_SENDER,
+                email_receiver=receiver
+            )
+            notifier.send_events_alert(events if events is not None else [])
+            
+        return events
+    except Exception as e:
+        logger.error(f"Failed to retrieve events: {e}", exc_info=True)
+        print(f"系統事件: 取得失敗 (錯誤: {e})")
+        return None

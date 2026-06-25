@@ -221,3 +221,31 @@ class IllumioClient:
         """
         return self._request("GET", f"/orgs/{self.org_id}/vens")
 
+    # ==========================================
+    # 5. System Events & Auditing Logs
+    # ==========================================
+    def get_events(self, status=None, severity=None, event_type=None, max_results=20):
+        """
+        Retrieves a list of system events/audit logs.
+        
+        Args:
+            status (str, optional): Filter by status (e.g. 'success', 'failure')
+            severity (str, optional): Filter by severity (e.g. 'info', 'warning', 'err')
+            event_type (str, optional): Filter by event type/name (e.g. 'workload.create')
+            max_results (int, optional): Max records to retrieve. Defaults to 20.
+            
+        Returns:
+            list: List of system event objects.
+        """
+        params = {}
+        if status:
+            params['status'] = status
+        if severity:
+            params['severity'] = severity
+        if event_type:
+            params['event_type'] = event_type
+        if max_results:
+            params['max_results'] = max_results
+            
+        return self._request("GET", f"/orgs/{self.org_id}/events", params=params)
+

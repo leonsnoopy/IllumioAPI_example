@@ -1,14 +1,10 @@
 import sys
 import logging
 import config
+from utils import reconfigure_stdout
 
 # Reconfigure stdout to use utf-8 to prevent encoding issues on Windows consoles
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        import io
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+reconfigure_stdout()
 
 # Set up basic console logging for the test script
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
