@@ -231,8 +231,8 @@ class TestIllumioClient(unittest.TestCase):
     @patch('subprocess.run')
     @patch('sys.platform', 'win32')
     def test_manage_schedule_windows_add(self, mock_run, mock_input):
-        # 1. Option 1 (Add/modify) -> Freq choice 1 (minute) -> Interval 15 -> Option 5 (Exit)
-        mock_input.side_effect = ["1", "1", "15", "5"]
+        # Action choice 1 (vens) -> Option 1 (Add/modify) -> Freq choice 1 (minute) -> Interval 15 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "1", "1", "15", "5"]
         mock_res = MagicMock()
         mock_res.returncode = 0
         mock_res.stdout = "SUCCESS: Created."
@@ -257,8 +257,8 @@ class TestIllumioClient(unittest.TestCase):
     @patch('subprocess.run')
     @patch('sys.platform', 'linux')
     def test_manage_schedule_linux_add(self, mock_run, mock_input):
-        # 1. Option 1 (Add/modify) -> Freq choice 2 (hours) -> Interval 6 -> Option 5 (Exit)
-        mock_input.side_effect = ["1", "2", "6", "5"]
+        # Action choice 1 (vens) -> Option 1 (Add/modify) -> Freq choice 2 (hours) -> Interval 6 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "1", "2", "6", "5"]
         
         mock_res_l = MagicMock()
         mock_res_l.returncode = 0
@@ -276,7 +276,7 @@ class TestIllumioClient(unittest.TestCase):
         args, kwargs = mock_run.call_args_list[1]
         self.assertEqual(args[0], ["crontab", "-"])
         self.assertIn("0 */6 * * *", kwargs["input"])
-        self.assertIn("vens # Illumio_VEN_Check", kwargs["input"])
+        self.assertIn("vens -notify # Illumio_VEN_Check", kwargs["input"])
         self.assertIn("other_job", kwargs["input"])
 
     def test_validate_time(self):
@@ -306,8 +306,8 @@ class TestIllumioClient(unittest.TestCase):
     @patch('subprocess.run')
     @patch('sys.platform', 'win32')
     def test_manage_schedule_windows_weekly(self, mock_run, mock_input):
-        # Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
-        mock_input.side_effect = ["1", "4", "MON, FRI", "14:30", "5"]
+        # Action choice 1 (vens) -> Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "1", "4", "MON, FRI", "14:30", "5"]
         mock_res = MagicMock()
         mock_res.returncode = 0
         mock_run.return_value = mock_res
@@ -332,8 +332,8 @@ class TestIllumioClient(unittest.TestCase):
     @patch('subprocess.run')
     @patch('sys.platform', 'linux')
     def test_manage_schedule_linux_weekly(self, mock_run, mock_input):
-        # Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
-        mock_input.side_effect = ["1", "4", "MON, FRI", "14:30", "5"]
+        # Action choice 1 (vens) -> Option 1 (Add/modify) -> Freq choice 4 (weekly) -> Weekdays MON,FRI -> Time 14:30 -> Option 5 (Exit)
+        mock_input.side_effect = ["1", "1", "4", "MON, FRI", "14:30", "5"]
         
         mock_res_l = MagicMock()
         mock_res_l.returncode = 0
@@ -434,6 +434,95 @@ class TestIllumioClient(unittest.TestCase):
         
         # Verify send_events_alert was called
         mock_notifier.send_events_alert.assert_called_once_with(mock_get_events.return_value)
+
+    @patch('requests.Session.request')
+    @patch('requests.Session.get')
+    def test_client_get_traffic_flows(self, mock_get, mock_request):
+        # 1. Mock create query response
+        mock_resp_create = MagicMock()
+        mock_resp_create.status_code = 201
+        mock_resp_create.json.return_value = {"href": "/orgs/1/traffic_flows/async_queries/mock-uuid"}
+        
+        # 2. Mock status poll response
+        mock_resp_status = MagicMock()
+        mock_resp_status.status_code = 200
+        mock_resp_status.json.return_value = {"status": "completed"}
+        
+        mock_request.side_effect = [mock_resp_create, mock_resp_status]
+        
+        # 3. Mock download response
+        mock_resp_download = MagicMock()
+        mock_resp_download.status_code = 200
+        mock_resp_download.text = "Source IP,Destination IP\n10.1.1.1,10.2.2.2"
+        mock_get.return_value = mock_resp_download
+        
+        csv_text = self.client.get_traffic_flows("2026-06-25T10:00:00Z", "2026-06-25T11:00:00Z", policy_decisions=["blocked"])
+        self.assertEqual(csv_text, "Source IP,Destination IP\n10.1.1.1,10.2.2.2")
+        
+        # Verify POST payload
+        mock_request.assert_any_call(
+            method="POST",
+            url="https://pce-mock.local:8443/api/v2/orgs/1/traffic_flows/async_queries",
+            params=None,
+            json={
+                "query_name": "Retrieve Traffic Flows",
+                "start_date": "2026-06-25T10:00:00Z",
+                "end_date": "2026-06-25T11:00:00Z",
+                "max_results": 1000,
+                "sources": {"include": [], "exclude": []},
+                "destinations": {"include": [], "exclude": []},
+                "services": {"include": [], "exclude": []},
+                "policy_decisions": ["blocked"]
+            },
+            verify=False
+        )
+
+    @patch('method.send_blocked_traffic_notification')
+    @patch('builtins.open', new_callable=MagicMock)
+    @patch('illumio_client.IllumioClient.get_traffic_flows')
+    def test_method_get_blocked_traffic(self, mock_get_traffic_flows, mock_file_open, mock_notify):
+        from unittest.mock import mock_open
+        mock_get_traffic_flows.return_value = (
+            "Source IP,Source Hostname,Destination IP,Destination Hostname,Protocol,Port,Num Flows,Reported Policy Decision,Last Detected\n"
+            "10.1.1.1,src-host,10.2.2.2,dst-host,TCP,80,5,Blocked,2026-06-25T10:00:00Z\n"
+        )
+        
+        # Set up mock open context manager
+        m_open = mock_open()
+        mock_file_open.side_effect = m_open
+        
+        from method import get_blocked_traffic
+        # Case 1: retrieve with no notify
+        flows = get_blocked_traffic(self.client, filter_val="hours=2")
+        self.assertEqual(len(flows), 1)
+        self.assertEqual(flows[0]["Source IP"], "10.1.1.1")
+        mock_file_open.assert_called_with("blocked_traffic.csv", "w", encoding="utf-8")
+        mock_notify.assert_not_called()
+        
+        # Case 2: retrieve with notify
+        mock_notify.reset_mock()
+        get_blocked_traffic(self.client, filter_val="24", notify_emails="leon@test.com")
+        mock_notify.assert_called_once_with(flows, receiver="leon@test.com")
+
+    @patch('method.send_email_notification')
+    @patch('illumio_client.IllumioClient.get_vens')
+    def test_method_get_vens_conditional_notify(self, mock_get_vens, mock_send_email):
+        # 1. Abnormal VEN present, but notify_emails is None (should not send email)
+        mock_get_vens.return_value = [{"hostname": "ven1", "status": "suspended"}]
+        from method import get_vens
+        get_vens(self.client)
+        mock_send_email.assert_not_called()
+        
+        # 2. Abnormal VEN present, and notify_emails is not None (should send email)
+        mock_send_email.reset_mock()
+        get_vens(self.client, notify_emails="leon@test.com")
+        mock_send_email.assert_called_once_with(mock_get_vens.return_value, receiver="leon@test.com")
+        
+        # 3. All VENs active, and notify_emails is not None (should not send email because count is 0)
+        mock_send_email.reset_mock()
+        mock_get_vens.return_value = [{"hostname": "ven1", "status": "active"}]
+        get_vens(self.client, notify_emails="leon@test.com")
+        mock_send_email.assert_not_called()
 
 
 class TestDecoupledComponents(unittest.TestCase):
@@ -561,6 +650,61 @@ class TestDecoupledComponents(unittest.TestCase):
         self.assertIn("success", body_text)
         self.assertIn("2026-06-25 10:44:39", body_text)
 
+    def test_scheduler_generic_action(self):
+        from scheduler import get_scheduler
+        
+        # Test default
+        sched_vens = get_scheduler(action="vens")
+        self.assertEqual(sched_vens.action, "vens")
+        self.assertEqual(sched_vens.task_name, "Illumio_VEN_Check")
+        self.assertIn("vens -notify", sched_vens.task_run_cmd)
+        
+        # Test custom action
+        sched_traffic = get_scheduler(action="blocked-traffic")
+        self.assertEqual(sched_traffic.action, "blocked-traffic")
+        self.assertEqual(sched_traffic.task_name, "Illumio_blocked_traffic_Check")
+        self.assertIn("blocked-traffic -notify", sched_traffic.task_run_cmd)
+
+    @patch('smtplib.SMTP')
+    def test_email_notifier_blocked_traffic_alert(self, mock_smtp_class):
+        from notifier import EmailNotifier
+        mock_smtp = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_smtp
+
+        notifier = EmailNotifier(
+            smtp_server="smtp.test.com",
+            smtp_port=587,
+            smtp_user="user",
+            smtp_password="pass",
+            email_sender="sender@test.com",
+            email_receiver="receiver1@test.com"
+        )
+        
+        flows = [{
+            "Last Detected": "2026-06-25T08:17:08Z",
+            "Source Hostname": "LowBattery",
+            "Source Name": "WinPC_William",
+            "Source IP": "10.1.23.67",
+            "Destination Hostname": "dst-host",
+            "Destination IP": "10.3.104.125",
+            "Protocol": "UDP",
+            "Port": "53",
+            "Num Flows": "54"
+        }]
+        res = notifier.send_blocked_traffic_alert(flows)
+        
+        self.assertTrue(res)
+        called_args = mock_smtp.sendmail.call_args[0]
+        
+        import email
+        msg_obj = email.message_from_string(called_args[2])
+        body_text = msg_obj.get_payload(decode=True).decode('utf-8')
+        self.assertIn("偵測到以下 1 筆被阻擋的連線記錄", body_text)
+        self.assertIn("LowBattery", body_text)
+        self.assertIn("dst-host", body_text)
+        self.assertIn("UDP/53", body_text)
+        self.assertIn("54", body_text)
+
 
 class TestMainCLI(unittest.TestCase):
     @patch('sys.argv', ['main.py', 'events', '-notify', 'leon_yc@syscom.com.tw, SW_Huang@syscom.com.tw'])
@@ -602,6 +746,26 @@ class TestMainCLI(unittest.TestCase):
         mock_events.assert_called_once()
         args, kwargs = mock_events.call_args
         self.assertEqual(kwargs.get("notify_emails"), "")
+
+    @patch('sys.argv', ['main.py', 'blocked-traffic', '-f', '24', '-notify', 'leon_yc@syscom.com.tw'])
+    @patch('main.IllumioClient')
+    @patch('main.AVAILABLE_METHODS')
+    @patch('main.config')
+    def test_main_cli_blocked_traffic_parsing(self, mock_config, mock_methods, mock_client_class):
+        mock_config.API_KEY_ID = "api_key"
+        mock_config.API_SECRET_TOKEN = "api_secret"
+        
+        mock_traffic = MagicMock()
+        mock_methods.__contains__.side_effect = lambda x: x in ["blocked-traffic"]
+        mock_methods.__getitem__.side_effect = lambda x: mock_traffic if x == "blocked-traffic" else MagicMock()
+        mock_methods.keys.return_value = ["blocked-traffic"]
+        
+        from main import main
+        main()
+        
+        mock_traffic.assert_called_once()
+        args, kwargs = mock_traffic.call_args
+        self.assertEqual(kwargs.get("notify_emails"), "leon_yc@syscom.com.tw")
 
 
 if __name__ == '__main__':

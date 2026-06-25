@@ -18,6 +18,7 @@ AVAILABLE_METHODS = {
     "tag": method.interactive_tagging,
     "schedule": method.manage_schedule,
     "events": method.get_events,
+    "blocked-traffic": method.get_blocked_traffic,
 }
 
 def setup_logging(log_filename="illumio.log"):
@@ -76,9 +77,9 @@ def show_help():
         },
         {
             "name": "vens",
-            "desc": "Retrieve VEN configurations and statuses (triggers alert email if abnormal).",
-            "params": "-f <filter_keyword> (fuzzy-matches hostname/status)",
-            "sample": "python main.py vens -f suspended"
+            "desc": "Retrieve VEN configurations and statuses.",
+            "params": "-f <filter_keyword> (fuzzy-matches hostname/status), -notify [emails] (send alert email only if abnormal VENs are found; if emails omitted, use default email in config)",
+            "sample": "python main.py vens -f suspended -notify"
         },
         {
             "name": "tag",
@@ -97,6 +98,12 @@ def show_help():
             "desc": "Retrieve PCE system operation logs (default: 10 recent records).",
             "params": "-f <filter> (smart query, e.g., success, info, status=failure, max: 20 records), -notify [emails] (send results via email; if emails omitted, use default email in config)",
             "sample": "python main.py events -f \"status=failure severity=warning\" -notify \"leon_yc@syscom.com.tw, SW_Huang@syscom.com.tw\""
+        },
+        {
+            "name": "blocked-traffic",
+            "desc": "Retrieve PCE blocked traffic flows (default: last 1 hour, saves CSV to blocked_traffic.csv).",
+            "params": "-f <hours> (time range in hours, e.g., 24), -notify [emails] (send results via email only if blocked traffic is found; if emails omitted, use default email in config)",
+            "sample": "python main.py blocked-traffic -f 24 -notify \"leon_yc@syscom.com.tw, SW_Huang@syscom.com.tw\""
         },
         {
             "name": "all",
@@ -210,7 +217,7 @@ def main():
     for target, filter_val in targets:
         func = AVAILABLE_METHODS[target]
         logger.info(f"開始執行動作: {target}" + (f" (過濾條件: '{filter_val}')" if filter_val else ""))
-        if target == "events":
+        if target in ("events", "vens", "blocked-traffic"):
             func(client, filter_val, notify_emails=notify_emails)
         else:
             func(client, filter_val)

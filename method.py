@@ -12,18 +12,19 @@ reconfigure_stdout()
 logger = logging.getLogger("illumio_client")
 
 
-def send_email_notification(abnormal_vens):
+def send_email_notification(abnormal_vens, receiver=None):
     """
     Sends an email notification if there are abnormal VENs.
     Delegates to the EmailNotifier service using global configuration options.
     """
+    email_receiver = receiver if isinstance(receiver, str) and receiver.strip() else config.EMAIL_RECEIVER
     notifier = EmailNotifier(
         smtp_server=config.SMTP_SERVER,
         smtp_port=config.SMTP_PORT,
         smtp_user=config.SMTP_USER,
         smtp_password=config.SMTP_PASSWORD,
         email_sender=config.EMAIL_SENDER,
-        email_receiver=config.EMAIL_RECEIVER
+        email_receiver=email_receiver
     )
     return notifier.send_abnormal_vens_alert(abnormal_vens)
 
@@ -143,7 +144,7 @@ def get_workloads(client, filter_val=None):
         return None
 
 
-def get_vens(client, filter_val=None):
+def get_vens(client, filter_val=None, notify_emails=None):
     """Retrieves VENs, displays their statuses, and triggers email notifications for abnormal VENs."""
     print_separator("Get Virtual Enforcement Nodes (VENs)")
     logger.info("Executing get_vens...")
@@ -192,11 +193,11 @@ def get_vens(client, filter_val=None):
             if status != "active":
                 abnormal_vens.append(ven)
                 
-        # Trigger email alerts if any abnormal VENs are found
-        if abnormal_vens:
+        # Trigger email alerts if any abnormal VENs are found and notify was requested
+        if abnormal_vens and notify_emails is not None:
             print_separator("VEN 異常狀態警報")
             print(f"偵測到 {len(abnormal_vens)} 個 VEN 狀態異常！觸發寄信通知機制...")
-            send_email_notification(abnormal_vens)
+            send_email_notification(abnormal_vens, receiver=notify_emails)
         else:
             print("\n所有 VEN 狀態均正常。")
             
@@ -462,9 +463,28 @@ def manage_schedule(client, filter_val=None):
     """
     logger.info("使用者啟動了『排程管理功能 (manage_schedule)』")
     print_separator("排程管理 (Schedule Management)")
-    print("此功能可在本機設定定期檢查 VEN 狀態，並在發現異常時自動發送電子郵件通知。")
+    
+    print("請選擇要管理的排程任務類型 (Action)：")
+    print("  1. 檢查 VEN 狀態 (vens)")
+    print("  2. 查詢被阻擋的連線流量 (blocked-traffic)")
+    
+    try:
+        action_choice = input("請選擇 (1/2, 預設 1): ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\n離開排程管理。")
+        return
+        
+    if action_choice == "2":
+        action = "blocked-traffic"
+        desc = "定期查詢被阻擋的連線流量，並在偵測到阻擋時自動發送電子郵件通知。"
+    else:
+        action = "vens"
+        desc = "定期檢查 VEN 狀態，並在發現異常時自動發送電子郵件通知。"
+        
+    print(f"\n已選擇排程任務: {action}")
+    print(f"任務說明: {desc}")
 
-    scheduler = get_scheduler()
+    scheduler = get_scheduler(action=action)
     is_windows = sys.platform.startswith("win")
     platform_name = "Windows" if is_windows else "Linux/macOS"
     print(f"偵測到當前作業系統為: {platform_name}")
@@ -662,4 +682,119 @@ def get_events(client, filter_val=None, notify_emails=None):
     except Exception as e:
         logger.error(f"Failed to retrieve events: {e}", exc_info=True)
         print(f"系統事件: 取得失敗 (錯誤: {e})")
+        return None
+
+
+def send_blocked_traffic_notification(blocked_flows, receiver=None):
+    """
+    Sends an email notification if there are blocked traffic flows.
+    """
+    email_receiver = receiver if isinstance(receiver, str) and receiver.strip() else config.EMAIL_RECEIVER
+    notifier = EmailNotifier(
+        smtp_server=config.SMTP_SERVER,
+        smtp_port=config.SMTP_PORT,
+        smtp_user=config.SMTP_USER,
+        smtp_password=config.SMTP_PASSWORD,
+        email_sender=config.EMAIL_SENDER,
+        email_receiver=email_receiver
+    )
+    return notifier.send_blocked_traffic_alert(blocked_flows)
+
+
+def get_blocked_traffic(client, filter_val=None, notify_emails=None):
+    """Retrieves blocked traffic flows, displays them in a table, and saves the raw CSV data."""
+    print_separator("Get Blocked Traffic Flows")
+    
+    # Parse filter value to determine the time range in hours
+    hours = 1
+    if filter_val:
+        import re
+        if filter_val.strip().isdigit():
+            hours = int(filter_val.strip())
+        else:
+            match = re.search(r'hours?=(\d+)', filter_val, re.IGNORECASE)
+            if match:
+                hours = int(match.group(1))
+            else:
+                print(f"[警告] 無法解析時間範圍過濾值 '{filter_val}'。將使用預設的 1 小時。")
+                
+    logger.info(f"Querying blocked traffic flows for the last {hours} hour(s)...")
+    print(f"查詢時間範圍: 過去 {hours} 小時")
+    
+    from datetime import datetime, timedelta, timezone
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    start_str = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    end_str = end.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    
+    try:
+        # 1. Download CSV data from PCE
+        csv_text = client.get_traffic_flows(start_date=start_str, end_date=end_str, policy_decisions=["blocked"])
+        
+        # 2. Save CSV text locally to blocked_traffic.csv
+        csv_path = "blocked_traffic.csv"
+        try:
+            with open(csv_path, "w", encoding="utf-8") as f:
+                f.write(csv_text)
+            logger.info(f"Successfully saved raw traffic CSV to {csv_path}")
+            print(f"CSV 檔案已儲存: {csv_path}")
+        except Exception as file_err:
+            logger.error(f"Failed to write CSV file: {file_err}", exc_info=True)
+            print(f"[警告] 無法將 CSV 寫入檔案 {csv_path} (錯誤: {file_err})")
+            
+        # 3. Parse CSV rows
+        import csv
+        import io
+        flows = []
+        f_in = io.StringIO(csv_text)
+        reader = csv.DictReader(f_in)
+        for row in reader:
+            flows.append(row)
+            
+        total_count = len(flows)
+        print(f"被阻擋流量: 成功取得 {total_count} 筆記錄")
+        
+        if total_count > 0:
+            print(f"\n顯示前 {total_count} 筆被阻擋的連線記錄:")
+            # Column widths: No(4), Last Detected(20), Source(25), Destination(25), Proto/Port(15), Conns(8)
+            print(f"{'No.':<4} {'Last Detected':<20} {'Source':<25} {'Destination':<25} {'Proto/Port':<15} {'Conns':<8}")
+            print("-" * 97)
+            for idx, flow in enumerate(flows, 1):
+                raw_ts = flow.get("Last Detected") or "N/A"
+                ts = convert_utc_to_taiwan_time(raw_ts) if raw_ts != "N/A" else "N/A"
+                
+                # Format source (prefer hostname/name over IP)
+                src_str = flow.get("Source Hostname") or flow.get("Source Name") or flow.get("Source IP") or "N/A"
+                
+                # Format destination
+                dst_str = flow.get("Destination Hostname") or flow.get("Destination Name") or flow.get("Destination IP") or "N/A"
+                
+                # Protocol/Port
+                proto = flow.get("Protocol") or "N/A"
+                port = flow.get("Port") or ""
+                proto_port = f"{proto}/{port}" if port else proto
+                
+                # Connections count
+                conns = flow.get("Num Flows") or "1"
+                
+                # Truncate columns if they exceed spacing
+                if len(src_str) > 23:
+                    src_str = src_str[:20] + "..."
+                if len(dst_str) > 23:
+                    dst_str = dst_str[:20] + "..."
+                if len(ts) > 19:
+                    ts = ts[:19]
+                    
+                print(f"{idx:<4} {ts:<20} {src_str:<25} {dst_str:<25} {proto_port:<15} {conns:<8}")
+                
+        # 4. Trigger email alerts if blocked traffic is found AND notify was requested
+        if flows and notify_emails is not None:
+            print_separator("被阻擋流量警報")
+            print(f"偵測到 {total_count} 筆被阻擋的連線！觸發寄信通知機制...")
+            send_blocked_traffic_notification(flows, receiver=notify_emails)
+            
+        return flows
+    except Exception as e:
+        logger.error(f"Failed to retrieve blocked traffic: {e}", exc_info=True)
+        print(f"被阻擋流量: 取得失敗 (錯誤: {e})")
         return None

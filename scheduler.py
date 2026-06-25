@@ -11,10 +11,23 @@ class BaseScheduler(ABC):
     Abstract Base Class for PCE Health / VEN check scheduling.
     Abstracts scheduling configurations across platforms.
     """
-    def __init__(self, task_name="Illumio_VEN_Check"):
-        self.task_name = task_name
+    def __init__(self, action="vens", task_name=None):
+        # Backward compatibility: if action is custom and task_name is None, treat it as task_name
+        if action not in ("vens", "blocked-traffic") and task_name is None:
+            task_name = action
+            action = "vens"
+            
+        self.action = action
+        if task_name:
+            self.task_name = task_name
+        else:
+            if action == "vens":
+                self.task_name = "Illumio_VEN_Check"
+            else:
+                sanitized = action.replace("-", "_")
+                self.task_name = f"Illumio_{sanitized}_Check"
         self.main_py_path = self._detect_main_py_path()
-        self.task_run_cmd = f'"{sys.executable}" "{self.main_py_path}" vens'
+        self.task_run_cmd = f'"{sys.executable}" "{self.main_py_path}" {self.action} -notify'
 
     def _detect_main_py_path(self):
         """
@@ -200,7 +213,7 @@ class LinuxScheduler(BaseScheduler):
         cron_lines = current_cron.splitlines()
         new_cron_lines = [line for line in cron_lines if f"# {self.task_name}" not in line]
         
-        new_line = f'{cron_expr} "{sys.executable}" "{self.main_py_path}" vens # {self.task_name}'
+        new_line = f'{cron_expr} "{sys.executable}" "{self.main_py_path}" {self.action} -notify # {self.task_name}'
         new_cron_lines.append(new_line)
         
         new_cron_content = "\n".join(new_cron_lines) + "\n"
@@ -276,10 +289,10 @@ class LinuxScheduler(BaseScheduler):
             return False
 
     def trigger_test(self):
-        logger.info(f"執行 Linux 前景排程測試指令: {sys.executable} {self.main_py_path} vens")
-        print(f"\n正在 Linux 上執行排程測試 (於前景執行 'python main.py vens')...")
+        logger.info(f"執行 Linux 前景排程測試指令: {sys.executable} {self.main_py_path} {self.action} -notify")
+        print(f"\n正在 Linux 上執行排程測試 (於前景執行 'python main.py {self.action} -notify')...")
         try:
-            subprocess.run([sys.executable, self.main_py_path, "vens"], check=True)
+            subprocess.run([sys.executable, self.main_py_path, self.action, "-notify"], check=True)
             print(f"[成功] 測試執行完成！已於前景輸出結果。")
             logger.info("Linux 前景排程測試執行成功。")
             return True
@@ -289,11 +302,11 @@ class LinuxScheduler(BaseScheduler):
             return False
 
 
-def get_scheduler(task_name="Illumio_VEN_Check"):
+def get_scheduler(action="vens", task_name=None):
     """
     Factory function returning the correct platform scheduler instance.
     """
     if sys.platform.startswith("win"):
-        return WindowsScheduler(task_name)
+        return WindowsScheduler(action=action, task_name=task_name)
     else:
-        return LinuxScheduler(task_name)
+        return LinuxScheduler(action=action, task_name=task_name)

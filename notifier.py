@@ -145,3 +145,54 @@ class EmailNotifier:
             body += "無符合條件之系統事件記錄。\n"
             
         return self._send_email(subject, body)
+
+    def send_blocked_traffic_alert(self, flows):
+        """
+        Sends an email notification when blocked traffic is detected.
+        """
+        if not self.email_receiver:
+            logger.warning("Email receiver not configured, skipping email notification.")
+            print("[警告] 未設定收件者信箱 (EMAIL_RECEIVER)，無法寄送通知。")
+            return False
+            
+        subject = "【警告】Illumio PCE 偵測到被阻擋的連線流量"
+        
+        body = f"偵測到以下 {len(flows)} 筆被阻擋的連線記錄，請儘速確認：\n\n"
+        if len(flows) > 0:
+            # Column widths: No(4), Last Detected(20), Source(25), Destination(25), Proto/Port(15), Conns(8)
+            body += f"{'No.':<4} {'Last Detected':<20} {'Source':<25} {'Destination':<25} {'Proto/Port':<15} {'Conns':<8}\n"
+            body += "-" * 97 + "\n"
+            
+            from utils import convert_utc_to_taiwan_time
+            for idx, flow in enumerate(flows, 1):
+                # Retrieve from dict fields (matching CSV columns)
+                raw_ts = flow.get("Last Detected") or "N/A"
+                ts = convert_utc_to_taiwan_time(raw_ts) if raw_ts != "N/A" else "N/A"
+                
+                # Format source (prefer hostname/name over IP)
+                src_str = flow.get("Source Hostname") or flow.get("Source Name") or flow.get("Source IP") or "N/A"
+                
+                # Format destination
+                dst_str = flow.get("Destination Hostname") or flow.get("Destination Name") or flow.get("Destination IP") or "N/A"
+                
+                # Protocol/Port
+                proto = flow.get("Protocol") or "N/A"
+                port = flow.get("Port") or ""
+                proto_port = f"{proto}/{port}" if port else proto
+                
+                # Connections count
+                conns = flow.get("Num Flows") or "1"
+                
+                # Truncate to match console layout
+                if len(src_str) > 23:
+                    src_str = src_str[:20] + "..."
+                if len(dst_str) > 23:
+                    dst_str = dst_str[:20] + "..."
+                if len(ts) > 19:
+                    ts = ts[:19]
+                    
+                body += f"{idx:<4} {ts:<20} {src_str:<25} {dst_str:<25} {proto_port:<15} {conns:<8}\n"
+        else:
+            body += "無被阻擋的連線記錄。\n"
+            
+        return self._send_email(subject, body)

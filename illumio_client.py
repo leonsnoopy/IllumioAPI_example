@@ -249,3 +249,64 @@ class IllumioClient:
             
         return self._request("GET", f"/orgs/{self.org_id}/events", params=params)
 
+    # ==========================================
+    # 6. Traffic Flows & Visualization
+    # ==========================================
+    def get_traffic_flows(self, start_date, end_date, policy_decisions=None, max_results=1000):
+        """
+        Retrieves traffic flows from the PCE using asynchronous queries and returns the CSV text.
+        
+        Args:
+            start_date (str): ISO 8601 formatted start date/time (e.g. '2026-06-25T10:00:00Z')
+            end_date (str): ISO 8601 formatted end date/time (e.g. '2026-06-25T11:00:00Z')
+            policy_decisions (list, optional): List of policy decisions (e.g. ['blocked'])
+            max_results (int, optional): Max records to retrieve. Defaults to 1000.
+            
+        Returns:
+            str: Traffic flow query result in CSV format.
+        """
+        payload = {
+            "query_name": "Retrieve Traffic Flows",
+            "start_date": start_date,
+            "end_date": end_date,
+            "max_results": max_results,
+            "sources": {
+                "include": [],
+                "exclude": []
+            },
+            "destinations": {
+                "include": [],
+                "exclude": []
+            },
+            "services": {
+                "include": [],
+                "exclude": []
+            }
+        }
+        if policy_decisions:
+            payload["policy_decisions"] = policy_decisions
+            
+        # 1. Create asynchronous query job
+        res = self._request("POST", f"/orgs/{self.org_id}/traffic_flows/async_queries", json=payload)
+        href = res.get("href")
+        if not href:
+            raise Exception("No href returned in async query response")
+            
+        # 2. Poll status until completed or failed
+        import time
+        while True:
+            status_res = self._request("GET", href)
+            status = status_res.get("status")
+            logger.info(f"Query {href} status: {status}")
+            if status == "completed":
+                break
+            elif status == "failed":
+                raise Exception(f"Async query failed: {status_res}")
+            time.sleep(2)
+            
+        # 3. Download results in CSV format
+        url = f"{self.base_url}{href}/download"
+        download_resp = self.session.get(url, headers={"Accept": "text/csv"}, verify=self.verify_ssl)
+        download_resp.raise_for_status()
+        return download_resp.text
+

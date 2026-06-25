@@ -26,3 +26,7 @@ Desktop.ini
 *.njsproj
 *.sln
 *.sw?
+
+# Generated CSV reports
+blocked_traffic.csv
+
